@@ -183,7 +183,7 @@ func (m *Model) handleKey(key app.KeyMsg) app.UpdateResult {
 
 	case input.ShiftEnter:
 		if !m.thinking {
-			m.chatInput = m.chatInput.Update(key.Key)
+			m.chatInput.Value += "\n"
 		}
 		return app.NoCmd(m)
 

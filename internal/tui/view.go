@@ -43,7 +43,7 @@ func (m *Model) view(focused string) node.Node {
 	if highlighted, ok := renderCommandInput(m.chatInput.Value); ok {
 		inputLine = highlighted
 	} else {
-		inputLine = m.chatInput.Render("  > ", colWhite, colorDefault, 0)
+		inputLine = m.chatInput.Render("  > ", colWhite, colorDefault, w)
 	}
 
 	// Help bar with key hints and active mode tag.
