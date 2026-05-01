@@ -38,6 +38,7 @@ type Model struct {
 	topK               int
 	tradeoffPreference string
 	lastSeg       *RecommendSegment
+	healthCheckCounter int
 
 	selectedItem   RecommendItem
 	varsToFill     []string
@@ -107,10 +108,12 @@ func (m *Model) update(msg app.Msg) app.UpdateResult {
 
 	case healthResultMsg:
 		m.backendOnline = msg.err == nil
-		if m.backendOnline {
-			m.convo.Add(TextSegment{Text: "[ok] Backend online"})
-		} else {
-			m.convo.Add(ErrorSegment{Message: "Backend offline -- run /daemon start or ./promptee daemon start"})
+		if msg.explicit {
+			if m.backendOnline {
+				m.convo.Add(TextSegment{Text: "[ok] Backend online"})
+			} else {
+				m.convo.Add(ErrorSegment{Message: "Backend offline -- run /daemon start or ./promptee daemon start"})
+			}
 		}
 		return app.NoCmd(m)
 
@@ -137,6 +140,17 @@ func (m *Model) update(msg app.Msg) app.UpdateResult {
 	case tickMsg:
 		if m.spinner.Kind != StatusIdle && m.spinner.Kind != StatusComplete {
 			m.spinner.Tick()
+		}
+		m.healthCheckCounter++
+		if m.healthCheckCounter >= 5 {
+			m.healthCheckCounter = 0
+			return app.UpdateResult{
+				Model: m,
+				Cmds: []app.Cmd{
+					func() app.Msg { return doHealthCheckBg(m.client) },
+					newTickCmd,
+				},
+			}
 		}
 		return app.WithCmd(m, newTickCmd)
 	}

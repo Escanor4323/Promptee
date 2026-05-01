@@ -23,7 +23,8 @@ type ingestResultMsg struct {
 }
 
 type healthResultMsg struct {
-	err error
+	err      error
+	explicit bool
 }
 
 type telemetryResultMsg struct {
@@ -71,7 +72,11 @@ func doIngest(client *api.Client, path string) app.Msg {
 }
 
 func doHealthCheck(client *api.Client) app.Msg {
-	return healthResultMsg{err: client.CheckHealth()}
+	return healthResultMsg{err: client.CheckHealth(), explicit: true}
+}
+
+func doHealthCheckBg(client *api.Client) app.Msg {
+	return healthResultMsg{err: client.CheckHealth(), explicit: false}
 }
 
 func doSubmitTelemetry(client *api.Client, templateID int, latencyMs float64) app.Msg {
