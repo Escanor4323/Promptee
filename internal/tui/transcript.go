@@ -51,6 +51,31 @@ func (s TextSegment) NodeRender() node.Node {
 	return node.Paragraph(s.Text, colorDefault, colorDefault, 0)
 }
 
+type SplashArtSegment struct {
+	Text string
+}
+
+func (s SplashArtSegment) Render() string {
+	return s.Text
+}
+
+func (s SplashArtSegment) NodeRender() node.Node {
+	lines := strings.Split(strings.TrimSpace(s.Text), "\n")
+	var rows []node.Node
+	for _, line := range lines {
+		children := []node.Node{}
+		for _, ch := range line {
+			if ch == '$' {
+				children = append(children, node.TextStyled("$", colOrange, colorDefault, 0))
+			} else {
+				children = append(children, node.Text(string(ch)))
+			}
+		}
+		rows = append(rows, node.Row(children...))
+	}
+	return node.Column(rows...)
+}
+
 type ToolCallSegment struct {
 	Name   string
 	Closed bool

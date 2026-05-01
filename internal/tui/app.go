@@ -88,7 +88,7 @@ func TooeyApp(apiURL string, topK int, tradeoffPreference string) *app.App {
 	return &app.App{
 		Init: func() interface{} {
 			mdl.width, mdl.height = input.TermSize()
-			mdl.convo.Add(TextSegment{Text: splashArt})
+			mdl.convo.Add(SplashArtSegment{Text: splashArt})
 			mdl.convo.Add(TextSegment{Text: " Promptee — Local MLOps & RAG CLI (Codename: Daedalus)"})
 			mdl.convo.Add(TextSegment{Text: ""})
 			return mdl
