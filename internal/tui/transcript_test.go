@@ -124,8 +124,8 @@ func TestTranscript_Add(t *testing.T) {
 	tr := NewTranscript()
 	tr.Add(TextSegment{Text: "hello"})
 	tr.Add(ErrorSegment{Message: "err"})
-	if len(tr.Segments()) != 2 {
-		t.Errorf("expected 2 segments, got %d", len(tr.Segments()))
+	if len(tr.Segments()) != 3 {
+		t.Errorf("expected 3 segments (splash art + hello + err), got %d", len(tr.Segments()))
 	}
 }
 

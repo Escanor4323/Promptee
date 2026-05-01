@@ -283,7 +283,9 @@ type Transcript struct {
 }
 
 func NewTranscript() *Transcript {
-	return &Transcript{charLimit: 10000}
+	t := &Transcript{charLimit: 10000}
+	t.Add(TextSegment{Text: splashArt})
+	return t
 }
 
 func (t *Transcript) Add(s Segment) {

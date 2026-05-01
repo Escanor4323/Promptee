@@ -14,11 +14,6 @@ func (m *Model) view(focused string) node.Node {
 		w = 80
 	}
 
-	// Show splash screen on initial load
-	if m.showingSplash {
-		return renderSplashScreen(m.width, m.height)
-	}
-
 	// Top status bar: " Promptee" left, backend/mode info right.
 	left := " Promptee"
 	right := m.statusRight()
@@ -85,46 +80,6 @@ func (m *Model) statusRight() string {
 		backend = "online"
 	}
 	return fmt.Sprintf("backend:%s │ k:%d ", backend, m.topK)
-}
-
-// renderSplashScreen displays the universe ASCII art splash screen
-func renderSplashScreen(w, h int) node.Node {
-	splashLines := strings.Split(splashArt, "\n")
-
-	// Center vertically
-	topPadding := (h - len(splashLines) - 2) / 2
-	if topPadding < 0 {
-		topPadding = 0
-	}
-
-	var nodes []node.Node
-
-	// Add top padding
-	for i := 0; i < topPadding; i++ {
-		nodes = append(nodes, node.Text(""))
-	}
-
-	// Add splash art lines, centered horizontally
-	for _, line := range splashLines {
-		lineLen := len([]rune(line))
-		leftPadding := (w - lineLen) / 2
-		if leftPadding < 0 {
-			leftPadding = 0
-		}
-		paddedLine := strings.Repeat(" ", leftPadding) + line
-		nodes = append(nodes, node.TextStyled(paddedLine, colCyan, colorDefault, 0))
-	}
-
-	// Add hint at bottom
-	nodes = append(nodes, node.Text(""))
-	hintText := "Type anything to begin..."
-	hintPad := (w - len(hintText)) / 2
-	if hintPad < 0 {
-		hintPad = 0
-	}
-	nodes = append(nodes, node.TextStyled(strings.Repeat(" ", hintPad)+hintText, colGray, colorDefault, 0))
-
-	return node.Column(nodes...)
 }
 
 // renderCommandInput colorizes a /command input line.
