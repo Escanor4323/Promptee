@@ -128,6 +128,13 @@ type TelemetryResponse struct {
 	ExecutedAt       string  `json:"executed_at"`
 }
 
+type TelemetrySummaryResponse struct {
+	TotalExecutions int               `json:"total_executions"`
+	AvgQualityScore float64           `json:"avg_quality_score"`
+	ByCategory      map[string]int    `json:"by_category"`
+	Percentages     map[string]float64 `json:"percentages"`
+}
+
 // SubmitTelemetry sends execution telemetry to the backend and returns the response.
 func (c *Client) SubmitTelemetry(ctx context.Context, req TelemetryRequest) (*TelemetryResponse, error) {
 	body, err := json.Marshal(req)
@@ -223,4 +230,26 @@ func (c *Client) SubmitFeedback(ctx context.Context, req FeedbackRequest) error 
 		return fmt.Errorf("feedback returned status %d", resp.StatusCode)
 	}
 	return nil
+}
+
+// GetTelemetrySummary fetches aggregated telemetry summary from the backend.
+func (c *Client) GetTelemetrySummary(ctx context.Context) (*TelemetrySummaryResponse, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/api/v1/telemetry/summary", nil)
+	if err != nil {
+		return nil, fmt.Errorf("create telemetry summary request: %w", err)
+	}
+	resp, err := c.HTTPClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("telemetry summary request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("telemetry summary returned status %d: %s", resp.StatusCode, string(body))
+	}
+	var result TelemetrySummaryResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode telemetry summary: %w", err)
+	}
+	return &result, nil
 }

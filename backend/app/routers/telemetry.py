@@ -249,3 +249,56 @@ async def create_feedback(body: FeedbackRequest) -> FeedbackResponse:
             notes=feedback.notes,
             created_at=str(feedback.created_at),
         )
+
+
+@router.get("/summary")
+async def get_telemetry_summary():
+    """Get aggregated telemetry: execution counts by category and avg quality."""
+    from sqlalchemy import func, select
+
+    from backend.app.models.executions import Execution
+    from backend.app.models.feedback import Feedback
+
+    async with async_session() as session:
+        # Total executions by addon_mode
+        stmt = (
+            select(Execution.addon_mode, func.count(Execution.id).label("count"))
+            .group_by(Execution.addon_mode)
+        )
+        result = await session.execute(stmt)
+        mode_counts = {row[0] or "none": row[1] for row in result.fetchall()}
+
+        # Total executions and avg quality
+        stmt = select(func.count(Execution.id), func.avg(Feedback.quality_score))
+        stmt = stmt.join(
+            Feedback, Feedback.execution_id == Execution.id, isouter=True
+        )
+        result = await session.execute(stmt)
+        total, avg_quality = result.one()
+
+        total = total or 0
+        avg_quality = float(avg_quality) if avg_quality else 0.0
+
+        # Calculate percentages
+        categories = {"speed": 0, "cost": 0, "quality": 0, "balanced": 0}
+        for mode, count in mode_counts.items():
+            if mode in categories:
+                categories[mode] = count
+
+        percentages = {}
+        for cat, count in categories.items():
+            percentages[cat] = (
+                round(100 * count / total, 1) if total > 0 else 0.0
+            )
+
+        return {
+            "total_executions": total,
+            "avg_quality_score": round(avg_quality, 1),
+            "by_category": {
+                "speed": categories["speed"],
+                "cost": categories["cost"],
+                "quality": categories["quality"],
+                "balanced": categories["balanced"],
+            },
+            "percentages": percentages,
+        }
