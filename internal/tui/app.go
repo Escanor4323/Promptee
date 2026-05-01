@@ -13,6 +13,29 @@ import (
 	"github.com/user/promptee/internal/telemetry"
 )
 
+const splashArt = `⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀∠⠉⠀⠀∠⠉⠉⠛⠛⠷⢶⣤⣄⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⣤⣴⣶⣶⣿⣿⣿⣿⣷⣶⣦⣤⣄⡀⠈⠙⠻⣷⣦⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⣀⣴⣾⣿⣿⠿⠿⠛⠛⠛⠛⠻⠿⠿⣿⣿⣿⣿⣿⣷⣤⡀⠀⠙⢿⣷⣄⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⢀⣴⣾⠿⠛⠉⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠙⠻⣿⣿⣿⣿⣷⡄⠀⠙⢿⣷⡀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⢀⣴⡿⠛⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⠙⢿⣿⣿⣿⣦⠀⠈⢿⣿⡄⠀⠀⠀⠀⠀
+⠀⠀⣠⡾⠋⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠒⠒⠒⠤⣄⣀⠀⠀⠀⠻⣿⣿⣿⣷⡀⠀⢿⣿⡀⠀⠀⠀⠀
+⠀⣰⠟⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣤⣴⣶⣶⣶⣶⣶⣦⣤⡀⠉⠳⣦⡀⠀⠘⣿⣿⣿⣧⠀⠈⣿⣇⠀⠀⠀⠀
+⢰⠏⠀⠀⠀⠀⠀⠀⢀⠔⠀⣠⣴⣿⣿⡿⠛⠋⠉⠉⠉⠉⠙⠻⣿⣷⡀⠈⢷⡀⠀⠸⣿⣿⣿⡄⠀⢹⣿⠀⠀⠀⠀
+⠏⠀⠀⠀⠀⠀⢀⡴⠃⢀⣼⣿⣿⠟⠁⠀⠀⡀⠀⢀⣠⣤⡤⣤⡈⢻⣿⡀⠘⣇⠀⠀⣿⣿⣿⡇⠀⢸⣿⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⢠⡞⠀⢠⣿⣿⡿⠁⠀⢀⡴⠊⣠⡾⠋⠉⠀⠀⠀⡟⢈⣿⡇⢠⡟⠀⠀⣿⣿⣿⠃⠀⣸⡏⠀⠀⠀⠀
+⠀⠀⠀⠀⢠⡟⠀⢀⣿⣿⡿⠀⠀⢠⡏⢠⣾⠏⢀⡠⢲⡖⢀⡜⠁⣼⡿⠀⣼⠃⠀⢰⣿⣿⡿⠀⢀⡿⠁⠀⠀⠀⠀
+⠀⠀⠀⠀⣿⠃⠀⣼⣿⣿⡇⠀⢠⡿⠀⣾⡏⢀⡎⠀⠈⠉⠁⢀⣼⠟⢁⡼⠁⠀⢀⣾⣿⡿⠁⠀⡾⠁⠀⠀⠀⠀⠀
+⠀⠀⠀⢸⣿⠀⠀⣿⣿⣿⡇⠀⢸⡇⠀⣿⣧⠸⣧⣤⣤⣴⠾⠛⠁⠐⠁⠀⠀⣠⣾⣿⡟⠁⢀⡞⠁⠀⠀⠀⠀⠀⡄
+⠀⠀⠀⢸⣿⠀⠀⣿⣿⣿⡇⠀⠈⣷⡀⠹⣿⣦⣀⠀⠀⠀⠀⠀⠀⠀⣀⣤⣾⣿⡿⠋⢀⡴⠋⠀⠀⠀⠀⠀⠀⣰⠃
+⠀⠀⠀⢸⣿⡄⠀⢹⣿⣿⣿⡀⠀⠘⢷⡄⠈⠻⢿⣿⣶⣶⣶⣶⣾⣿⣿⡿⠟⠋⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣼⠃⠀
+⠀⠀⠀⠈⣿⣧⠀⠈⢿⣿⣿⣷⡄⠀⠀⠙⠳⠤⣀⣈⠉⠉⠙⠋⠉⠉⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣠⣾⠃⠀⠀
+⠀⠀⠀⠀⠘⣿⣧⠀⠈⢿⣿⣿⣿⣦⡀⠀⠀⠀⠀⠀⠈⠉⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣠⣾⡟⠁⠀⠀⠀
+⠀⠀⠀⠀⠀⠙⣿⣧⡀⠀⠻⣿⣿⣿⣿⣦⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣤⣾⡿⠋⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠈⠻⣿⣆⠀⠈⠻⢿⣿⣿⣿⣿⣶⣤⣄⣀⡀⠀⠀⠀⠀⢀⣀⣀⣤⣶⣾⡿⠟⠉⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠈⠻⣷⣦⣀⠀⠉⠻⠿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡿⠿⠛⠉⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠛⠷⣦⣤⣀⠀⠈⠉⠉⠙⠛⠛⠛⠉⠉⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠉⠛⠛⠒⠒⠒⠒⠒⠒⠒⠂⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀`
+
 type inputMode int
 
 const (
@@ -40,6 +63,7 @@ type Model struct {
 	lastSeg       *RecommendSegment
 	healthCheckCounter int
 	needsInitialHealthCheck bool
+	showingSplash  bool
 
 	selectedItem   RecommendItem
 	varsToFill     []string
@@ -61,6 +85,7 @@ func NewModel(apiURL string, topK int, tradeoffPreference string) *Model {
 		tradeoffPreference: tradeoffPreference,
 		mode:      modeQuery,
 		varValues: make(map[string]string),
+		showingSplash: true,
 	}
 }
 
@@ -239,6 +264,11 @@ func (m *Model) handleKey(key app.KeyMsg) app.UpdateResult {
 
 // handleSubmit processes a submitted text depending on the current mode.
 func (m *Model) handleSubmit(text string) app.UpdateResult {
+	// Hide splash screen on first input
+	if m.showingSplash {
+		m.showingSplash = false
+	}
+
 	switch m.mode {
 	case modeQuery:
 		m.convo.Add(UserMsgSegment{Text: text})
