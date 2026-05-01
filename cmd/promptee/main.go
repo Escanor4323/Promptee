@@ -12,6 +12,7 @@ import (
 	"github.com/user/promptee/internal/api"
 	"github.com/user/promptee/internal/daemon"
 	"github.com/user/promptee/internal/tui"
+	"golang.org/x/term"
 )
 
 const (
@@ -79,6 +80,13 @@ func run(cmd *cobra.Command, args []string) error {
 		}
 		return runAgentMode(flagAPIURL, args[0], flagTopK, flagTradeoff, flagJSON)
 	}
+
+	// Set terminal to raw mode for TUI
+	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
+	if err != nil {
+		return fmt.Errorf("failed to set raw mode: %w", err)
+	}
+	defer term.Restore(int(os.Stdin.Fd()), oldState)
 
 	tuiApp := tui.TooeyApp(flagAPIURL, flagTopK, flagTradeoff)
 	return tuiApp.Run(context.Background())

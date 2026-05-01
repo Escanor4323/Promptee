@@ -46,6 +46,9 @@ func (m *Model) view(focused string) node.Node {
 		inputLine = m.chatInput.Render("  > ", colWhite, colorDefault, 0)
 	}
 
+	// Bottom border
+	bottomBorder := node.TextStyled(strings.Repeat("─", w), colDimGray, colorDefault, 0)
+
 	// Help bar with key hints and active mode tag.
 	helpText := "Ctrl+C:quit │ /help:commands │ 1-9:select │ mouse:scroll"
 	if m.mode == modeVarFill {
@@ -65,7 +68,7 @@ func (m *Model) view(focused string) node.Node {
 		convoArea,
 		sep,
 		inputLine.WithKey("chat-input").WithFocusable(),
-		sep,
+		bottomBorder,
 		helpBar,
 	)
 }

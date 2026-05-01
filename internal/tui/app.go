@@ -70,6 +70,7 @@ func TooeyApp(apiURL string, topK int, tradeoffPreference string) *app.App {
 	mdl.needsInitialHealthCheck = true
 	return &app.App{
 		Init: func() interface{} {
+			mdl.width, mdl.height = input.TermSize()
 			return mdl
 		},
 		Update: func(m interface{}, msg app.Msg) app.UpdateResult {
