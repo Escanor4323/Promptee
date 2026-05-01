@@ -101,7 +101,7 @@ Promptee/
 
 **Optional Deliverable:** Output a `.env` schema for `pydantic-settings` to manage local configurations for internal memory.
 
-**Status:** ⬜ Not Started
+**Status:** ✅ Complete
 
 ---
 
@@ -122,7 +122,7 @@ Promptee/
 
 **Optional Deliverable:** Output the Python Regex extraction logic and the complete Milvus Collection Schema configuration for internal memory.
 
-**Status:** ⬜ Not Started
+**Status:** ✅ Complete
 
 ---
 
@@ -144,7 +144,7 @@ Promptee/
 
 **Optional Deliverable:** Output the Entity-Relationship Diagram (ERD) mapping the Milvus vector entities to the SQLite telemetry tables for internal memory.
 
-**Status:** ⬜ Not Started
+**Status:** ✅ Complete
 
 ---
 
@@ -165,7 +165,7 @@ Promptee/
 
 **Optional Deliverable:** Output the specific mathematical weighting function used for the hybrid reranking algorithm for internal memory.
 
-**Status:** ⬜ Not Started
+**Status:** ✅ Complete
 
 ---
 
@@ -188,7 +188,7 @@ Promptee/
 
 **Optional Deliverable:** Write comprehensive pytest and pytest-asyncio suites covering the API boundaries to guarantee 80%+ test coverage before outputting the Go CLI routing structure for internal memory.
 
-**Status:** ⬜ Not Started
+**Status:** 🔄 In Progress
 
 ---
 
