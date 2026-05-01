@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/stukennedy/tooey/app"
@@ -13,77 +14,70 @@ import (
 	"github.com/user/promptee/internal/telemetry"
 )
 
-const splashArt = `⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀∠⠉⠀⠀∠⠉⠉⠛⠛⠷⢶⣤⣄⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⣤⣴⣶⣶⣿⣿⣿⣿⣷⣶⣦⣤⣄⡀⠈⠙⠻⣷⣦⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠀⣀⣴⣾⣿⣿⠿⠿⠛⠛⠛⠛⠻⠿⠿⣿⣿⣿⣿⣿⣷⣤⡀⠀⠙⢿⣷⣄⠀⠀⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⢀⣴⣾⠿⠛⠉⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠙⠻⣿⣿⣿⣿⣷⡄⠀⠙⢿⣷⡀⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⢀⣴⡿⠛⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⠙⢿⣿⣿⣿⣦⠀⠈⢿⣿⡄⠀⠀⠀⠀⠀
-⠀⠀⣠⡾⠋⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠒⠒⠒⠤⣄⣀⠀⠀⠀⠻⣿⣿⣿⣷⡀⠀⢿⣿⡀⠀⠀⠀⠀
-⠀⣰⠟⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣤⣴⣶⣶⣶⣶⣶⣦⣤⡀⠉⠳⣦⡀⠀⠘⣿⣿⣿⣧⠀⠈⣿⣇⠀⠀⠀⠀
-⢰⠏⠀⠀⠀⠀⠀⠀⢀⠔⠀⣠⣴⣿⣿⡿⠛⠋⠉⠉⠉⠉⠙⠻⣿⣷⡀⠈⢷⡀⠀⠸⣿⣿⣿⡄⠀⢹⣿⠀⠀⠀⠀
-⠏⠀⠀⠀⠀⠀⢀⡴⠃⢀⣼⣿⣿⠟⠁⠀⠀⡀⠀⢀⣠⣤⡤⣤⡈⢻⣿⡀⠘⣇⠀⠀⣿⣿⣿⡇⠀⢸⣿⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⢠⡞⠀⢠⣿⣿⡿⠁⠀⢀⡴⠊⣠⡾⠋⠉⠀⠀⠀⡟⢈⣿⡇⢠⡟⠀⠀⣿⣿⣿⠃⠀⣸⡏⠀⠀⠀⠀
-⠀⠀⠀⠀⢠⡟⠀⢀⣿⣿⡿⠀⠀⢠⡏⢠⣾⠏⢀⡠⢲⡖⢀⡜⠁⣼⡿⠀⣼⠃⠀⢰⣿⣿⡿⠀⢀⡿⠁⠀⠀⠀⠀
-⠀⠀⠀⠀⣿⠃⠀⣼⣿⣿⡇⠀⢠⡿⠀⣾⡏⢀⡎⠀⠈⠉⠁⢀⣼⠟⢁⡼⠁⠀⢀⣾⣿⡿⠁⠀⡾⠁⠀⠀⠀⠀⠀
-⠀⠀⠀⢸⣿⠀⠀⣿⣿⣿⡇⠀⢸⡇⠀⣿⣧⠸⣧⣤⣤⣴⠾⠛⠁⠐⠁⠀⠀⣠⣾⣿⡟⠁⢀⡞⠁⠀⠀⠀⠀⠀⡄
-⠀⠀⠀⢸⣿⠀⠀⣿⣿⣿⡇⠀⠈⣷⡀⠹⣿⣦⣀⠀⠀⠀⠀⠀⠀⠀⣀⣤⣾⣿⡿⠋⢀⡴⠋⠀⠀⠀⠀⠀⠀⣰⠃
-⠀⠀⠀⢸⣿⡄⠀⢹⣿⣿⣿⡀⠀⠘⢷⡄⠈⠻⢿⣿⣶⣶⣶⣶⣾⣿⣿⡿⠟⠋⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣼⠃⠀
-⠀⠀⠀⠈⣿⣧⠀⠈⢿⣿⣿⣷⡄⠀⠀⠙⠳⠤⣀⣈⠉⠉⠙⠋⠉⠉⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣠⣾⠃⠀⠀
-⠀⠀⠀⠀⠘⣿⣧⠀⠈⢿⣿⣿⣿⣦⡀⠀⠀⠀⠀⠀⠈⠉⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣠⣾⡟⠁⠀⠀⠀
-⠀⠀⠀⠀⠀⠙⣿⣧⡀⠀⠻⣿⣿⣿⣿⣦⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣤⣾⡿⠋⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠈⠻⣿⣆⠀⠈⠻⢿⣿⣿⣿⣿⣶⣤⣄⣀⡀⠀⠀⠀⠀⢀⣀⣀⣤⣶⣾⡿⠟⠉⠀⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠀⠈⠻⣷⣦⣀⠀⠉⠻⠿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡿⠿⠛⠉⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠛⠷⣦⣤⣀⠀⠈⠉⠉⠙⠛⠛⠛⠉⠉⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠉⠛⠛⠒⠒⠒⠒⠒⠒⠒⠂⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀`
+const splashArt = ` /$$$$$$$                                               /$$
+| $$__  $$                                             | $$
+| $$  \ $$ /$$$$$$   /$$$$$$  /$$$$$$/$$$$   /$$$$$$  /$$$$$$    /$$$$$$   /$$$$$$
+| $$$$$$$//$$__  $$ /$$__  $$| $$_  $$_  $$ /$$__  $$|_  $$_/   /$$__  $$ /$$__  $$
+| $$____/| $$  \__/| $$  \ $$| $$ \ $$ \ $$| $$  \ $$  | $$    | $$$$$$$$| $$$$$$$$
+| $$     | $$      | $$  | $$| $$ | $$ | $$| $$  | $$  | $$ /$$| $$_____/| $$_____/
+| $$     | $$      |  $$$$$$/| $$ | $$ | $$| $$$$$$$/  |  $$$$/|  $$$$$$$|  $$$$$$$
+|__/     |__/       \______/ |__/ |__/ |__/| $$____/    \___/   \_______/ \_______/
+                                           | $$
+                                           | $$
+                                           |__/`
 
 type inputMode int
 
 const (
 	modeQuery inputMode = iota
+	modeSelectConfirm
+	modeAddonSelect
 	modeVarFill
 	modeAddOnSelect
 )
 
 // Model holds all application state for the tooey-based TUI.
 type Model struct {
-	client     *api.Client
-	chatInput  component.TextInput
-	convo      *Transcript
-	spinner    SpinnerState
-	timer      *telemetry.Timer
-	scrollOff  int
-
-	mode          inputMode
-	width         int
-	height        int
-	backendOnline bool
-	lastQuery     string
-	topK               int
-	tradeoffPreference string
-	lastSeg       *RecommendSegment
-	healthCheckCounter int
-	needsInitialHealthCheck bool
-
-	selectedItem   RecommendItem
-	varsToFill     []string
-	varFillIdx     int
-	varValues      map[string]string
-	availableAddons []api.AddOn
-	lastLatencyMs  float64
-	thinking       bool
+	client                   *api.Client
+	chatInput                component.TextInput
+	convo                    *Transcript
+	spinner                  SpinnerState
+	timer                    *telemetry.Timer
+	scrollOff                int
+	mode                     inputMode
+	width                    int
+	height                   int
+	backendOnline            bool
+	lastQuery                string
+	topK                     int
+	tradeoffPreference       string
+	lastSeg                  *RecommendSegment
+	healthCheckCounter       int
+	needsInitialHealthCheck  bool
+	firstSubmissionDone      bool
+	selectedItem             RecommendItem
+	varsToFill               []string
+	varFillIdx               int
+	varValues                map[string]string
+	availableAddons          []api.AddOn
+	lastLatencyMs            float64
+	lastTemplateID           int
+	lastExecutionID          int
+	lastAddonMode            string
+	thinking                 bool
 }
 
 // NewModel creates the initial application model.
 func NewModel(apiURL string, topK int, tradeoffPreference string) *Model {
 	return &Model{
-		client:    api.NewClient(apiURL),
-		chatInput: component.NewTextInput("Type a query or /help for commands..."),
-		convo:     NewTranscript(),
-		spinner:   NewSpinnerState(),
-		topK:               topK,
+		client:            api.NewClient(apiURL),
+		chatInput:         component.NewTextInput("Type a query or /help for commands..."),
+		convo:             NewTranscript(),
+		spinner:           NewSpinnerState(),
+		topK:              topK,
 		tradeoffPreference: tradeoffPreference,
-		mode:      modeQuery,
-		varValues: make(map[string]string),
+		mode:              modeQuery,
+		varValues:         make(map[string]string),
 	}
 }
 
@@ -94,6 +88,9 @@ func TooeyApp(apiURL string, topK int, tradeoffPreference string) *app.App {
 	return &app.App{
 		Init: func() interface{} {
 			mdl.width, mdl.height = input.TermSize()
+			mdl.convo.Add(TextSegment{Text: splashArt})
+			mdl.convo.Add(TextSegment{Text: " Promptee — Local MLOps & RAG CLI (Codename: Daedalus)"})
+			mdl.convo.Add(TextSegment{Text: ""})
 			return mdl
 		},
 		Update: func(m interface{}, msg app.Msg) app.UpdateResult {
@@ -157,8 +154,17 @@ func (m *Model) update(msg app.Msg) app.UpdateResult {
 		return app.NoCmd(m)
 
 	case telemetryResultMsg:
-		if msg.err == nil {
-			m.convo.Add(TextSegment{Text: "[ok] Telemetry recorded"})
+		if msg.err != nil {
+			m.convo.Add(ErrorSegment{Message: fmt.Sprintf("telemetry error: %s", msg.err.Error())})
+		} else if msg.resp != nil {
+			m.lastExecutionID = msg.resp.ID
+			m.convo.Add(TextSegment{Text: fmt.Sprintf(
+				"[ok] Telemetry recorded (execution #%d)  speed=%.2f cost=%.2f quality=%.2f",
+				msg.resp.ID,
+				msg.resp.TradeoffSpeed,
+				msg.resp.TradeoffCost,
+				msg.resp.TradeoffQuality,
+			)})
 		}
 		return app.NoCmd(m)
 
@@ -235,7 +241,11 @@ func (m *Model) handleKey(key app.KeyMsg) app.UpdateResult {
 		return app.NoCmd(m)
 
 	case input.Escape:
-		if m.mode == modeVarFill {
+		if m.mode == modeSelectConfirm {
+			m.mode = modeQuery
+			m.spinner.SetStatus(StatusIdle, "")
+			m.convo.Add(TextSegment{Text: "Selection cancelled — choose again (1-5)"})
+		} else if m.mode == modeVarFill {
 			m.mode = modeQuery
 			m.spinner.SetStatus(StatusIdle, "")
 			m.convo.Add(TextSegment{Text: "Variable fill cancelled"})
@@ -264,7 +274,26 @@ func (m *Model) handleKey(key app.KeyMsg) app.UpdateResult {
 func (m *Model) handleSubmit(text string) app.UpdateResult {
 	switch m.mode {
 	case modeQuery:
+		if !m.firstSubmissionDone {
+			m.convo.RemoveFirst()
+			m.firstSubmissionDone = true
+		}
 		m.convo.Add(UserMsgSegment{Text: text})
+
+		if strings.TrimSpace(text) == "/copy" {
+			if m.lastTemplateID == 0 {
+				m.convo.Add(ErrorSegment{Message: "No prompt selected. Select one first (press 1-9)."})
+			} else {
+				filled := formatFinalPrompt(m.selectedItem, m.varValues)
+				if err := copyToClipboard(filled); err != nil {
+					m.convo.Add(ErrorSegment{Message: fmt.Sprintf("Failed to copy: %v", err)})
+				} else {
+					m.convo.Add(TextSegment{Text: "[ok] Prompt copied to clipboard"})
+				}
+			}
+			return app.NoCmd(m)
+		}
+
 		d := dispatchCommand(text, m.client, m.topK, m.tradeoffPreference)
 		switch {
 		case d.msg == "__clear__":
@@ -291,6 +320,12 @@ func (m *Model) handleSubmit(text string) app.UpdateResult {
 			return app.WithCmd(m, d.cmd)
 		}
 
+	case modeSelectConfirm:
+		m.proceedWithSelection()
+
+	case modeAddonSelect:
+		m.handleAddonSelection(text)
+
 	case modeVarFill:
 		m.handleVarFillInput(text)
 	}
@@ -315,12 +350,17 @@ func (m *Model) handleRecommendResult(msg recommendResultMsg) app.UpdateResult {
 	m.lastSeg = &seg
 	m.convo.Add(seg)
 	m.spinner.SetStatus(StatusComplete, fmt.Sprintf("%d results", len(items)))
+
+	if len(items) > 0 {
+		m.lastTemplateID = items[0].TemplateID
+	}
+
 	latencyMs := float64(0)
 	if m.timer != nil {
 		latencyMs = m.timer.ElapsedMs()
 	}
 	return app.WithCmd(m, func() app.Msg {
-		return doSubmitTelemetry(m.client, 0, latencyMs)
+		return doSubmitTelemetry(m.client, m.lastTemplateID, latencyMs, m.tradeoffPreference)
 	})
 }
 
@@ -337,19 +377,66 @@ func (m *Model) handleIngestResult(msg ingestResultMsg) app.UpdateResult {
 }
 
 func (m *Model) enterVarFill(item RecommendItem) {
-	m.mode = modeVarFill
+	m.mode = modeSelectConfirm
 	m.selectedItem = item
 	m.varsToFill = prompt.ParseVariables(item.FullText)
 	m.varFillIdx = 0
 	m.varValues = make(map[string]string)
-	m.availableAddons = nil
+	m.availableAddons = item.ApplicableAddons
+	m.lastTemplateID = item.TemplateID
 
+	m.convo.Add(SelectionSegment{
+		Title:     item.Title,
+		Score:     item.Score,
+		Objective: item.Objective,
+		Variables: item.Variables,
+	})
+	m.chatInput = component.NewTextInput("Press ENTER to proceed, or ESC to reselect...")
+	m.spinner.SetStatus(StatusIdle, "")
+}
+
+func (m *Model) proceedWithSelection() {
+	if len(m.availableAddons) > 0 {
+		m.mode = modeAddonSelect
+		m.convo.Add(TextSegment{Text: "Available Add-Ons (optional enhancements for SPEED/COST/QUALITY):"})
+		for i, addon := range m.availableAddons {
+			m.convo.Add(TextSegment{Text: fmt.Sprintf("  %d. [%s] %s", i+1, addon.Mode, addon.Description)})
+		}
+		m.chatInput = component.NewTextInput("Select addon (1-" + fmt.Sprintf("%d", len(m.availableAddons)) + ") or press ENTER to skip...")
+		m.spinner.SetStatus(StatusIdle, "")
+	} else {
+		m.proceedToVariableFill()
+	}
+}
+
+func (m *Model) proceedToVariableFill() {
+	m.mode = modeVarFill
 	if len(m.varsToFill) > 0 {
 		m.chatInput = component.NewTextInput("Enter value for [" + m.varsToFill[0] + "]")
-		m.spinner.SetStatus(StatusIdle, "")
 	} else {
 		m.showFinalPrompt()
 	}
+}
+
+func (m *Model) handleAddonSelection(text string) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		m.convo.Add(TextSegment{Text: "No add-on selected. Proceeding with base prompt."})
+		m.lastAddonMode = ""
+		m.proceedToVariableFill()
+		return
+	}
+
+	idx, err := strconv.Atoi(text)
+	if err != nil || idx < 1 || idx > len(m.availableAddons) {
+		m.convo.Add(ErrorSegment{Message: "Invalid selection. Enter a number or press ENTER to skip."})
+		return
+	}
+
+	selected := m.availableAddons[idx-1]
+	m.lastAddonMode = selected.Mode
+	m.convo.Add(TextSegment{Text: fmt.Sprintf("[ok] Selected add-on: [%s] %s", selected.Mode, selected.Description)})
+	m.proceedToVariableFill()
 }
 
 func (m *Model) handleVarFillInput(value string) {
@@ -371,10 +458,18 @@ func (m *Model) handleVarFillInput(value string) {
 
 func (m *Model) showFinalPrompt() {
 	final := formatFinalPrompt(m.selectedItem, m.varValues)
-	m.convo.Add(TextSegment{Text: "[ok] Final Prompt:\n\n" + final})
-	m.spinner.SetStatus(StatusComplete, "Copied to clipboard")
+	m.convo.Add(AssistantMsgSegment{Text: "**Final Prompt:**\n\n" + final})
+
+	if len(m.availableAddons) > 0 {
+		m.convo.Add(TextSegment{Text: "Available addons:"})
+		for _, addon := range m.availableAddons {
+			m.convo.Add(TextSegment{Text: fmt.Sprintf("  [%s] %s", addon.Mode, addon.Description)})
+		}
+	}
+
+	m.spinner.SetStatus(StatusComplete, "Ready")
 	m.mode = modeQuery
-	m.chatInput = component.NewTextInput("Type a query or /help for commands...")
+	m.chatInput = component.NewTextInput("Type a query or /help for commands...   (press 1-5 to rate)")
 	if m.timer != nil {
 		m.lastLatencyMs = m.timer.ElapsedMs()
 	}

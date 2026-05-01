@@ -1,7 +1,7 @@
-"""SQLite Engine & Session Factory for Promptee.
+"""Database Engine & Session Factory for Promptee.
 
-Provides async SQLAlchemy engine bound to a configurable SQLite path,
-an async session context manager, and a table-creation utility.
+Supports both PostgreSQL (preferred) and SQLite (fallback) via environment variables.
+Provides async SQLAlchemy engine and session management.
 """
 
 import logging
@@ -14,13 +14,43 @@ from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 logger = logging.getLogger(__name__)
 
-# Configurable SQLite database path (default: ./data/promptee.db)
-DATABASE_DIR: str = os.getenv("PROMPTEE_DB_DIR", "./data")
-DATABASE_PATH: str = os.getenv(
-    "PROMPTEE_DB_PATH",
-    os.path.join(DATABASE_DIR, "promptee.db"),
-)
-DATABASE_URL: str = f"sqlite+aiosqlite:///{DATABASE_PATH}"
+
+def _construct_database_url() -> str:
+    """Construct DATABASE_URL from environment variables.
+
+    Priority:
+    1. DATABASE_URL if explicitly set
+    2. PostgreSQL if PG_* env vars present
+    3. SQLite as fallback (backwards compatible)
+    """
+    # Explicit DATABASE_URL takes precedence
+    if explicit_url := os.getenv("DATABASE_URL"):
+        logger.info("Using explicit DATABASE_URL")
+        return explicit_url
+
+    # PostgreSQL configuration
+    pg_host = os.getenv("PG_HOST")
+    pg_port = os.getenv("PG_PORT", "5432")
+    pg_user = os.getenv("PG_USER", "promptee")
+    pg_password = os.getenv("PG_PASSWORD", "promptee_password")
+    pg_database = os.getenv("PG_DATABASE", "promptee")
+
+    if pg_host:
+        url = f"postgresql+asyncpg://{pg_user}:{pg_password}@{pg_host}:{pg_port}/{pg_database}"
+        logger.info("Using PostgreSQL database at %s:%s/%s", pg_host, pg_port, pg_database)
+        return url
+
+    # SQLite fallback (backwards compatible)
+    db_dir = os.getenv("PROMPTEE_DB_DIR", "./data")
+    db_path = os.getenv(
+        "PROMPTEE_DB_PATH",
+        os.path.join(db_dir, "promptee.db"),
+    )
+    logger.info("Using SQLite database at %s", db_path)
+    return f"sqlite+aiosqlite:///{db_path}"
+
+
+DATABASE_URL: str = _construct_database_url()
 
 
 class Base(DeclarativeBase):
@@ -63,16 +93,24 @@ async def async_session() -> AsyncGenerator[AsyncSession, None]:
 
 
 async def init_db() -> None:
-    """Create the data directory and all database tables.
+    """Create all database tables.
 
     Safe to call multiple times -- SQLAlchemy ``create_all`` is idempotent
-    for existing tables.
+    for existing tables. For SQLite, also ensures data directory exists.
     """
-    db_dir: str = os.path.dirname(DATABASE_PATH)
-    if db_dir:
-        os.makedirs(db_dir, exist_ok=True)
-        logger.info("Ensured database directory exists: %s", db_dir)
+    # Ensure SQLite data directory exists (no-op for PostgreSQL)
+    if "sqlite" in DATABASE_URL:
+        db_dir = os.path.dirname(
+            os.getenv("PROMPTEE_DB_PATH", os.path.join("./data", "promptee.db"))
+        )
+        if db_dir:
+            os.makedirs(db_dir, exist_ok=True)
+            logger.info("Ensured database directory exists: %s", db_dir)
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        logger.info("Database tables created / verified at %s", DATABASE_PATH)
+
+    if "postgresql" in DATABASE_URL:
+        logger.info("Database tables created / verified in PostgreSQL")
+    else:
+        logger.info("Database tables created / verified in SQLite")

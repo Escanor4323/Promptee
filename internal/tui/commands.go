@@ -3,6 +3,9 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -28,7 +31,8 @@ type healthResultMsg struct {
 }
 
 type telemetryResultMsg struct {
-	err error
+	resp *api.TelemetryResponse
+	err  error
 }
 
 type feedbackResultMsg struct {
@@ -79,25 +83,25 @@ func doHealthCheckBg(client *api.Client) app.Msg {
 	return healthResultMsg{err: client.CheckHealth(), explicit: false}
 }
 
-func doSubmitTelemetry(client *api.Client, templateID int, latencyMs float64) app.Msg {
+func doSubmitTelemetry(client *api.Client, templateID int, latencyMs float64, addonMode string) app.Msg {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	err := client.SubmitTelemetry(ctx, api.TelemetryRequest{
+	resp, err := client.SubmitTelemetry(ctx, api.TelemetryRequest{
 		TemplateID: templateID,
 		LatencyMs:  latencyMs,
 		Verbosity:  "moderate",
-		AddonMode:  "balanced",
+		AddonMode:  addonMode,
 	})
-	return telemetryResultMsg{err: err}
+	return telemetryResultMsg{resp: resp, err: err}
 }
 
 func doSubmitFeedback(client *api.Client, executionID int, qualityScore int, notes string) app.Msg {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	err := client.SubmitFeedback(ctx, api.FeedbackRequest{
-		ExecutionID:   executionID,
-		QualityScore:  qualityScore,
-		Notes:         notes,
+		ExecutionID:  executionID,
+		QualityScore: qualityScore,
+		Notes:        notes,
 	})
 	return feedbackResultMsg{err: err}
 }
@@ -148,12 +152,9 @@ func dispatchCommand(input string, client *api.Client, topK int, tradeoffPrefere
 		}
 	case "/feedback":
 		if arg == "" {
-			return dispatchResult{msg: "Usage: /feedback <text>"}
+			return dispatchResult{msg: "Usage: /feedback <1-5> [notes]"}
 		}
-		return dispatchResult{
-			cmd: func() app.Msg { return doSubmitFeedback(client, 0, 4, arg) },
-			msg: "Submitting feedback...",
-		}
+		return dispatchResult{msg: "Use number keys 1-5 after a recommendation to rate it"}
 	case "/telemetry":
 		return dispatchResult{msg: formatTelemetryHelp()}
 	case "/daemon":
@@ -204,20 +205,47 @@ func parseNumSelection(input string) (int, bool) {
 
 func formatHelpText() string {
 	return `Available commands:
-/ingest <path> — Ingest file/directory into vector store
-/telemetry — Show telemetry info
-/feedback <text> — Submit feedback
-/daemon start|stop|status — Manage backend daemon
-/health — Check backend health
-/clear — Clear transcript
-/help — Show this help
-/quit — Exit Promptee
+ /ingest <path>     — Ingest file/directory into vector store
+ /copy              — Copy filled prompt to clipboard
+ /telemetry         — Show telemetry info
+ /feedback <1-5>    — Rate last execution (1-5 stars)
+ /daemon start|stop|status — Manage backend daemon
+ /health            — Check backend health
+ /clear             — Clear transcript
+ /help              — Show this help
+ /quit              — Exit Promptee
 
-Type anything else to search for prompt recommendations.`
+ Type anything else to search for prompt recommendations.
+ After results appear, press 1-9 to select one.`
 }
 
 func formatTelemetryHelp() string {
-	return "Telemetry is recorded automatically after each recommendation. No manual action needed."
+	return `**Telemetry & Feedback System**
+
+Promptee automatically tracks execution metrics to optimize future recommendations:
+
+  **Captured Metrics:**
+    • Latency — How fast the prompt executed
+    • Token Usage — Input/output token counts (COST optimization)
+    • Context Window % — Memory efficiency
+    • Quality Score — Your 1-5 star feedback
+
+  **Optimization Strategy:**
+    The system maps these metrics to developer tradeoffs:
+      SPEED  — Low latency + token usage
+      COST   — Minimal input/output tokens
+      QUALITY — High quality scores from feedback
+
+  **How It Works:**
+    1. You select a prompt + optional add-on
+    2. Promptee records execution metrics
+    3. You rate it (1-5 stars) after execution
+    4. The rating boosts similar prompts in future searches
+    5. Recommendations get smarter over time
+
+  **Your Action:**
+    After executing a prompt, press 1-5 to rate it. This helps Promptee
+    learn what works best for your workflow. No rating needed if you skip.`
 }
 
 func formatDaemonHelp(arg string) string {
@@ -231,6 +259,24 @@ func formatDaemonHelp(arg string) string {
 	default:
 		return "Usage: /daemon start|stop|status"
 	}
+}
+
+func copyToClipboard(text string) error {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("pbcopy")
+	case "linux":
+		cmd = exec.Command("xclip", "-selection", "clipboard")
+	case "windows":
+		cmd = exec.Command("powershell", "-Command", fmt.Sprintf("Set-Clipboard -Value $input"))
+	default:
+		return fmt.Errorf("clipboard not supported on %s", runtime.GOOS)
+	}
+	cmd.Stdin = strings.NewReader(text)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }
 
 var _ = fmt.Sprintf

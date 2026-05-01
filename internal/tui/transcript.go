@@ -108,7 +108,10 @@ type RecommendSegment struct {
 func (s RecommendSegment) Render() string {
 	var b strings.Builder
 	b.WriteString(">>> Recommendations:\n")
-	for _, item := range s.Items {
+	for i, item := range s.Items {
+		if i > 0 {
+			b.WriteString(" ─────────────────────────────────────────────────────────\n")
+		}
 		b.WriteString(item.Render())
 		b.WriteByte('\n')
 	}
@@ -119,18 +122,24 @@ func (s RecommendSegment) NodeRender() node.Node {
 	children := []node.Node{
 		node.TextStyled(">>>  Recommendations:", colorBlue, colorDefault, node.Bold),
 	}
-	for _, item := range s.Items {
+	for i, item := range s.Items {
+		if i > 0 {
+			children = append(children, node.TextStyled(" ─────────────────────────────────────────────────────────", colDimGray, colorDefault, 0))
+		}
 		children = append(children, item.NodeRender())
 	}
 	return node.Column(children...)
 }
 
 type RecommendItem struct {
-	Index     int
-	Title     string
-	Score     float64
-	Variables []string
-	FullText  string
+	Index            int
+	TemplateID       int
+	Title            string
+	Score            float64
+	Objective        string
+	Variables        []string
+	FullText         string
+	ApplicableAddons []api.AddOn
 }
 
 func (i RecommendItem) Render() string {
@@ -167,6 +176,38 @@ func (s ErrorSegment) NodeRender() node.Node {
 		node.TextStyled("[!]", colorRed, colorDefault, node.Bold),
 		node.TextStyled(" Error: "+s.Message, colorRed, colorDefault, 0),
 	)
+}
+
+type SelectionSegment struct {
+	Title    string
+	Score    float64
+	Objective string
+	Variables []string
+}
+
+func (s SelectionSegment) Render() string {
+	vars := ""
+	if len(s.Variables) > 0 {
+		vars = "\nVariables: " + strings.Join(s.Variables, ", ")
+	}
+	return fmt.Sprintf(">>> SELECTED: %s [%.2f]\n%s%s\n(press ESC to reselect)", s.Title, s.Score, s.Objective, vars)
+}
+
+func (s SelectionSegment) NodeRender() node.Node {
+	scoreText := fmt.Sprintf("[%.2f]", s.Score)
+	children := []node.Node{
+		node.Row(
+			node.TextStyled(">>> SELECTED: ", colorGreen, colorDefault, node.Bold),
+			node.TextStyled(s.Title, colorOrange, colorDefault, node.Bold),
+			node.TextStyled(" "+scoreText, colorOrange, colorDefault, 0),
+		),
+		node.Text(s.Objective),
+	}
+	if len(s.Variables) > 0 {
+		children = append(children, node.Text("Variables: "+strings.Join(s.Variables, ", ")))
+	}
+	children = append(children, node.TextStyled("(press ESC to reselect)", colGray, colorDefault, 0))
+	return node.Column(children...)
 }
 
 type UserMsgSegment struct {
@@ -298,6 +339,12 @@ func (t *Transcript) Segments() []Segment {
 	return out
 }
 
+func (t *Transcript) RemoveFirst() {
+	if len(t.segments) > 0 {
+		t.segments = t.segments[1:]
+	}
+}
+
 func (t *Transcript) Render() string {
 	return t.renderWithLimit(t.charLimit)
 }
@@ -427,11 +474,14 @@ func ResultsToItems(results []api.RecommendResult) []RecommendItem {
 	items := make([]RecommendItem, len(results))
 	for i, r := range results {
 		items[i] = RecommendItem{
-			Index:     i + 1,
-			Title:     r.Title,
-			Score:     r.HybridScore,
-			Variables: r.Variables,
-			FullText:  r.FullText,
+			Index:            i + 1,
+			TemplateID:       r.TemplateID,
+			Title:            r.Title,
+			Score:            r.HybridScore,
+			Objective:        r.Objective,
+			Variables:        r.Variables,
+			FullText:         r.FullText,
+			ApplicableAddons: r.ApplicableAddons,
 		}
 	}
 	return items

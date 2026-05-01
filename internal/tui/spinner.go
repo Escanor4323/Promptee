@@ -5,15 +5,8 @@ import (
 	"time"
 )
 
-var CogitatingMessages = []string{
-	"Cogitating...",
-	"Pontificating...",
-	"Ruminating...",
-	"Deliberating...",
-	"Pondering...",
-	"Meditating...",
-	"Percolating...",
-	"Marinating...",
+var spinnerFrames = []string{
+	"·", "✻", "✽", "✶", "✳", "✢",
 }
 
 type StatusKind string
@@ -77,11 +70,10 @@ func (s *SpinnerState) Tick() string {
 		return coloredPrefix + " " + label
 	}
 
-	msg := CogitatingMessages[s.Index]
-	result := fmt.Sprintf("%s %s", coloredPrefix, msg)
-	s.Index = (s.Index + 1) % len(CogitatingMessages)
+	frame := spinnerFrames[s.Index]
+	s.Index = (s.Index + 1) % len(spinnerFrames)
 	s.LastTick = time.Now()
-	return result
+	return fmt.Sprintf("%s %s", coloredPrefix, frame)
 }
 
 func (s *SpinnerState) SetStatus(kind StatusKind, detail string) {

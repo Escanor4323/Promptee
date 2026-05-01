@@ -37,7 +37,7 @@ class TelemetryRequest(BaseModel):
     """Request body for POST /api/v1/telemetry."""
 
     template_id: int = Field(..., description="FK to templates table")
-    latency_ms: float = Field(..., gt=0, description="Execution latency in ms")
+    latency_ms: float = Field(..., ge=0, description="Execution latency in ms")
     input_tokens: int = Field(..., ge=0, description="Prompt tokens sent")
     output_tokens: int = Field(..., ge=0, description="Completion tokens received")
     context_window_pct: float = Field(

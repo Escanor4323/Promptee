@@ -27,8 +27,8 @@ func TestSpinnerTick_Active(t *testing.T) {
 	if !strings.Contains(got, ">>>") {
 		t.Errorf("expected >>> prefix, got %q", got)
 	}
-	if !strings.Contains(got, "Cogitating") && !strings.Contains(got, "Pontificating") {
-		t.Errorf("expected cogitating message, got %q", got)
+	if !strings.Contains(got, "·") && !strings.Contains(got, "✻") {
+		t.Errorf("expected spinner frame, got %q", got)
 	}
 }
 
@@ -82,9 +82,9 @@ func TestSpinnerSetStatus_SameKindKeepsIndex(t *testing.T) {
 	}
 }
 
-func TestCogitatingMessagesNotEmpty(t *testing.T) {
-	if len(CogitatingMessages) == 0 {
-		t.Error("CogitatingMessages should not be empty")
+func TestSpinnerFramesNotEmpty(t *testing.T) {
+	if len(spinnerFrames) == 0 {
+		t.Error("spinnerFrames should not be empty")
 	}
 }
 

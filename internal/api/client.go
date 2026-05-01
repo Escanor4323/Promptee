@@ -61,6 +61,7 @@ type AddOn struct {
 // RecommendResult is a single recommendation from the backend.
 type RecommendResult struct {
 	ID               int     `json:"id"`
+	TemplateID       int     `json:"template_id"`
 	Title            string  `json:"title"`
 	Objective        string  `json:"objective"`
 	FullText         string  `json:"full_text"`
@@ -111,28 +112,48 @@ type TelemetryRequest struct {
 	AddonMode        string  `json:"addon_mode,omitempty"`
 }
 
-// SubmitTelemetry sends execution telemetry to the backend.
-func (c *Client) SubmitTelemetry(ctx context.Context, req TelemetryRequest) error {
+// TelemetryResponse is the parsed response from POST /api/v1/telemetry.
+type TelemetryResponse struct {
+	ID               int     `json:"id"`
+	TemplateID       int     `json:"template_id"`
+	LatencyMs        float64 `json:"latency_ms"`
+	InputTokens      int     `json:"input_tokens"`
+	OutputTokens     int     `json:"output_tokens"`
+	ContextWindowPct float64 `json:"context_window_pct"`
+	Verbosity        string  `json:"verbosity"`
+	TradeoffSpeed    float64 `json:"tradeoff_speed"`
+	TradeoffCost     float64 `json:"tradeoff_cost"`
+	TradeoffQuality  float64 `json:"tradeoff_quality"`
+	AddonMode        string  `json:"addon_mode,omitempty"`
+	ExecutedAt       string  `json:"executed_at"`
+}
+
+// SubmitTelemetry sends execution telemetry to the backend and returns the response.
+func (c *Client) SubmitTelemetry(ctx context.Context, req TelemetryRequest) (*TelemetryResponse, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
-		return fmt.Errorf("marshal telemetry request: %w", err)
+		return nil, fmt.Errorf("marshal telemetry request: %w", err)
 	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/api/v1/telemetry", bytes.NewReader(body))
 	if err != nil {
-		return fmt.Errorf("create telemetry request: %w", err)
+		return nil, fmt.Errorf("create telemetry request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	resp, err := c.HTTPClient.Do(httpReq)
 	if err != nil {
-		return fmt.Errorf("telemetry request failed: %w", err)
+		return nil, fmt.Errorf("telemetry request failed: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusCreated {
 		var bodyBytes []byte
 		bodyBytes, _ = io.ReadAll(resp.Body)
-		return fmt.Errorf("telemetry returned status %d: %s", resp.StatusCode, string(bodyBytes))
+		return nil, fmt.Errorf("telemetry returned status %d: %s", resp.StatusCode, string(bodyBytes))
 	}
-	return nil
+	var result TelemetryResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode telemetry response: %w", err)
+	}
+	return &result, nil
 }
 
 // FeedbackRequest is the body for POST /api/v1/feedback.

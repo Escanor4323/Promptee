@@ -50,25 +50,6 @@ class RecommendResponse(BaseModel):
     results: list[RecommendItem]
 
 
-# --- Telemetry schemas ---
-
-
-class TelemetryRequest(BaseModel):
-    template_id: int
-    latency_ms: float = Field(..., gt=0)
-    input_tokens: int = Field(..., ge=0)
-    output_tokens: int = Field(..., ge=0)
-    context_window_pct: float = Field(..., ge=0.0, le=100.0)
-    verbosity: str
-    addon_mode: str | None = None
-
-
-class FeedbackRequest(BaseModel):
-    execution_id: int
-    quality_score: int = Field(..., ge=1, le=5)
-    notes: str | None = None
-
-
 # --- Bulk search result (used internally by recommend) ---
 
 

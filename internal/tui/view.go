@@ -44,6 +44,13 @@ func (m *Model) view(focused string) node.Node {
 		inputLine = highlighted
 	} else {
 		inputLine = m.chatInput.Render("  > ", colWhite, colorDefault, 0)
+		if m.mode == modeQuery && m.chatInput.Value == "" {
+			inputLine = node.Row(
+				node.TextStyled("  ", colWhite, colorDefault, 0),
+				node.TextStyled("$", colOrange, colorDefault, node.Bold),
+				node.Text(" "),
+			)
+		}
 	}
 
 	// Bottom border

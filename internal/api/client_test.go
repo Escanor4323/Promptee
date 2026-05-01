@@ -48,7 +48,7 @@ func TestCheckHealth_Failure(t *testing.T) {
 func TestRecommend_Success(t *testing.T) {
 	expected := RecommendResponse{
 		Results: []RecommendResult{
-			{ID: 1, Title: "Test Prompt", HybridScore: 0.95, Variables: []string{"NAME"}},
+			{ID: 1, TemplateID: 10, Title: "Test Prompt", HybridScore: 0.95, Variables: []string{"NAME"}},
 		},
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -62,9 +62,7 @@ func TestRecommend_Success(t *testing.T) {
 
 	c := NewClient(srv.URL)
 	resp, err := c.Recommend(context.Background(), RecommendRequest{
-		Query:              "test query",
-		TopK:               5,
-		TradeoffPreference: "balanced",
+		Query: "test query", TopK: 5, TradeoffPreference: "balanced",
 	})
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
@@ -74,6 +72,9 @@ func TestRecommend_Success(t *testing.T) {
 	}
 	if resp.Results[0].Title != "Test Prompt" {
 		t.Errorf("expected title 'Test Prompt', got %q", resp.Results[0].Title)
+	}
+	if resp.Results[0].TemplateID != 10 {
+		t.Errorf("expected TemplateID 10, got %d", resp.Results[0].TemplateID)
 	}
 }
 
@@ -100,8 +101,7 @@ func TestIngest_Success(t *testing.T) {
 
 	c := NewClient(srv.URL)
 	resp, err := c.Ingest(context.Background(), IngestRequest{
-		Paths:     []string{"a.md", "b.md"},
-		Directory: "/tmp/prompts",
+		Paths: []string{"a.md", "b.md"}, Directory: "/tmp/prompts",
 	})
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
@@ -125,22 +125,30 @@ func TestIngest_ServerError(t *testing.T) {
 }
 
 func TestSubmitTelemetry_Success(t *testing.T) {
+	expected := TelemetryResponse{
+		ID: 1, TemplateID: 1, LatencyMs: 100.5,
+		InputTokens: 50, OutputTokens: 200, ContextWindowPct: 25.0,
+		Verbosity: "moderate", TradeoffSpeed: 0.73, TradeoffCost: 0.82, TradeoffQuality: 0.5,
+	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusCreated)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(expected)
 	}))
 	defer srv.Close()
 
 	c := NewClient(srv.URL)
-	err := c.SubmitTelemetry(context.Background(), TelemetryRequest{
-		TemplateID:       1,
-		LatencyMs:        100.5,
-		InputTokens:      50,
-		OutputTokens:     200,
-		ContextWindowPct: 25.0,
-		Verbosity:        "moderate",
+	resp, err := c.SubmitTelemetry(context.Background(), TelemetryRequest{
+		TemplateID: 1, LatencyMs: 100.5,
+		InputTokens: 50, OutputTokens: 200, ContextWindowPct: 25.0, Verbosity: "moderate",
 	})
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
+	}
+	if resp.ID != 1 {
+		t.Errorf("expected ID 1, got %d", resp.ID)
+	}
+	if resp.TradeoffSpeed != 0.73 {
+		t.Errorf("expected TradeoffSpeed 0.73, got %f", resp.TradeoffSpeed)
 	}
 }
 
@@ -151,7 +159,7 @@ func TestSubmitTelemetry_ServerError(t *testing.T) {
 	defer srv.Close()
 
 	c := NewClient(srv.URL)
-	err := c.SubmitTelemetry(context.Background(), TelemetryRequest{
+	_, err := c.SubmitTelemetry(context.Background(), TelemetryRequest{
 		TemplateID: 1, LatencyMs: 10, InputTokens: 5, OutputTokens: 20,
 		ContextWindowPct: 10, Verbosity: "moderate",
 	})
@@ -168,9 +176,7 @@ func TestSubmitFeedback_Success(t *testing.T) {
 
 	c := NewClient(srv.URL)
 	err := c.SubmitFeedback(context.Background(), FeedbackRequest{
-		ExecutionID:  1,
-		QualityScore: 4,
-		Notes:        "good result",
+		ExecutionID: 1, QualityScore: 4, Notes: "good result",
 	})
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
@@ -185,8 +191,7 @@ func TestSubmitFeedback_ServerError(t *testing.T) {
 
 	c := NewClient(srv.URL)
 	err := c.SubmitFeedback(context.Background(), FeedbackRequest{
-		ExecutionID:  1,
-		QualityScore: 3,
+		ExecutionID: 1, QualityScore: 3,
 	})
 	if err == nil {
 		t.Fatal("expected error for 400 response")
