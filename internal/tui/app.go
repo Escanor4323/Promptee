@@ -39,6 +39,7 @@ type Model struct {
 	tradeoffPreference string
 	lastSeg       *RecommendSegment
 	healthCheckCounter int
+	needsInitialHealthCheck bool
 
 	selectedItem   RecommendItem
 	varsToFill     []string
@@ -66,6 +67,7 @@ func NewModel(apiURL string, topK int, tradeoffPreference string) *Model {
 // TooeyApp returns an app.App wired to this model's Init/Update/View.
 func TooeyApp(apiURL string, topK int, tradeoffPreference string) *app.App {
 	mdl := NewModel(apiURL, topK, tradeoffPreference)
+	mdl.needsInitialHealthCheck = true
 	return &app.App{
 		Init: func() interface{} {
 			return mdl
@@ -81,6 +83,13 @@ func TooeyApp(apiURL string, topK int, tradeoffPreference string) *app.App {
 
 // update is the central message dispatcher for the tooey App.
 func (m *Model) update(msg app.Msg) app.UpdateResult {
+	if m.needsInitialHealthCheck {
+		m.needsInitialHealthCheck = false
+		return app.WithCmd(m, func() app.Msg {
+			return doHealthCheckBg(m.client)
+		})
+	}
+
 	switch msg := msg.(type) {
 	case app.ResizeMsg:
 		m.width = msg.Width
