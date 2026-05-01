@@ -292,8 +292,12 @@ func (m *Model) handleRecommendResult(msg recommendResultMsg) app.UpdateResult {
 	m.lastSeg = &seg
 	m.convo.Add(seg)
 	m.spinner.SetStatus(StatusComplete, fmt.Sprintf("%d results", len(items)))
+	latencyMs := float64(0)
+	if m.timer != nil {
+		latencyMs = m.timer.ElapsedMs()
+	}
 	return app.WithCmd(m, func() app.Msg {
-		return doSubmitTelemetry(m.client, 0, m.timer.ElapsedMs())
+		return doSubmitTelemetry(m.client, 0, latencyMs)
 	})
 }
 
@@ -348,7 +352,9 @@ func (m *Model) showFinalPrompt() {
 	m.spinner.SetStatus(StatusComplete, "Copied to clipboard")
 	m.mode = modeQuery
 	m.chatInput = component.NewTextInput("Type a query or /help for commands...")
-	m.lastLatencyMs = m.timer.ElapsedMs()
+	if m.timer != nil {
+		m.lastLatencyMs = m.timer.ElapsedMs()
+	}
 }
 
 // startRecommend begins a recommendation query, returning async cmds.
