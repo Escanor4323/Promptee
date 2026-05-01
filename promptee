@@ -24,6 +24,7 @@ build_project() {
   # Build Go binary
   echo "🔨 Building Go binary..."
   make go-build > /dev/null 2>&1
+  cp "$SCRIPT_DIR/bin/promptee" "$BIN"
   echo "  ✓ Binary built"
 
   # Run tests
