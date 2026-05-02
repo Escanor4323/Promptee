@@ -49,6 +49,8 @@ const (
 	Paste // Bracketed paste — Key.Rune is unused; full text is in Key.Text
 	CtrlShiftC
 	CtrlShiftV
+	CmdC  // macOS Command+C
+	CmdV  // macOS Command+V
 )
 
 // Key represents a keyboard input event.
@@ -395,12 +397,23 @@ func parseCSI(data []byte) (Key, int) {
 		}
 	}
 	// Handle Ctrl+Shift sequences: \x1b[67;6u (Ctrl+Shift+C), \x1b[86;6u (Ctrl+Shift+V)
-	if len(data) >= 5 && (string(data[0:3]) == "67;" || string(data[0:3]) == "86;") && (data[3] == '6' || data[3] == '1') && data[4] == 'u' {
+	// and macOS Cmd sequences: \x1b[67;2u (Cmd+C), \x1b[86;2u (Cmd+V)
+	if len(data) >= 5 && (string(data[0:3]) == "67;" || string(data[0:3]) == "86;") && data[4] == 'u' {
 		if data[0] == '6' && data[1] == '7' { // 67 = 'C'
-			return Key{Type: CtrlShiftC}, 5
+			switch data[3] {
+			case '6', '1': // Ctrl+Shift modifiers
+				return Key{Type: CtrlShiftC}, 5
+			case '2', '9': // Cmd modifiers (macOS Terminal.app and iTerm2)
+				return Key{Type: CmdC}, 5
+			}
 		}
 		if data[0] == '8' && data[1] == '6' { // 86 = 'V'
-			return Key{Type: CtrlShiftV}, 5
+			switch data[3] {
+			case '6', '1': // Ctrl+Shift modifiers
+				return Key{Type: CtrlShiftV}, 5
+			case '2', '9': // Cmd modifiers (macOS Terminal.app and iTerm2)
+				return Key{Type: CmdV}, 5
+			}
 		}
 	}
 	// Handle sequences like \x1b[5~ (PageUp), \x1b[6~ (PageDown), \x1b[3~ (Delete)

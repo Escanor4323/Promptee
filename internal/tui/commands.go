@@ -15,6 +15,14 @@ import (
 	"github.com/user/promptee/internal/prompt"
 )
 
+// getClipboardKeybindings returns platform-specific clipboard shortcuts
+func getClipboardKeybindings() (copy, paste string) {
+	if runtime.GOOS == "darwin" {
+		return "Cmd+C", "Cmd+V"
+	}
+	return "Ctrl+Shift+C", "Ctrl+Shift+V"
+}
+
 type recommendResultMsg struct {
 	resp *api.RecommendResponse
 	err  error
@@ -274,7 +282,8 @@ func parseNumSelection(input string) (int, bool) {
 }
 
 func formatHelpText() string {
-	return `Available commands:
+	copyKey, pasteKey := getClipboardKeybindings()
+	return fmt.Sprintf(`Available commands:
  /ingest <path>         — Ingest file/directory into vector store
  /ingest-batch <paths>  — Ingest multiple space-separated paths
  /model <name>          — Switch active model for telemetry tracking
@@ -288,12 +297,12 @@ func formatHelpText() string {
  /help                  — Show this help
  /quit                  — Exit Promptee
 
- Clipboard (safe keybindings):
-   Ctrl+Shift+C         — Copy selected prompt to system clipboard
-   Ctrl+Shift+V         — Paste from clipboard into input (bracketed paste mode)
+ Clipboard:
+   %s  — Copy selected prompt to system clipboard
+   %s  — Paste from clipboard into input (bracketed paste mode)
 
  Type anything else to search for prompt recommendations.
- After results appear, press 1-9 to select one.`
+ After results appear, press 1-9 to select one.`, copyKey, pasteKey)
 }
 
 func formatTelemetryHelp() string {

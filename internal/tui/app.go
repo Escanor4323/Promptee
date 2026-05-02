@@ -295,6 +295,28 @@ func (m *Model) handleKey(key app.KeyMsg) app.UpdateResult {
 		}
 		return app.NoCmd(m)
 
+	case input.CmdC: // macOS Command+C
+		if m.lastSeg != nil && m.selectedItem.FullText != "" {
+			filled := formatFinalPrompt(m.selectedItem, m.varValues)
+			if err := copyToClipboard(filled); err != nil {
+				m.convo.Add(ErrorSegment{Message: fmt.Sprintf("Failed to copy: %v", err)})
+			} else {
+				m.convo.Add(TextSegment{Text: "✓ Prompt copied to clipboard"})
+			}
+		}
+		return app.NoCmd(m)
+
+	case input.CmdV: // macOS Command+V
+		if !m.thinking {
+			// Try to read from clipboard and paste into input
+			cmd := exec.Command("pbpaste")
+			output, err := cmd.Output()
+			if err == nil {
+				m.chatInput.Value += string(output)
+			}
+		}
+		return app.NoCmd(m)
+
 	case input.RuneKey:
 		if num, ok := numKeyTypes[key.Key.Rune]; ok && m.mode == modeQuery && m.lastSeg != nil {
 			item, found := selectRecommendation(*m.lastSeg, num)
