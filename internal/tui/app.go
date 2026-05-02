@@ -88,6 +88,8 @@ func NewModel(apiURL string, topK int, tradeoffPreference string) *Model {
 }
 
 // TooeyApp returns an app.App wired to this model's Init/Update/View.
+// Clipboard: Use Ctrl+Shift+C to copy, Ctrl+Shift+V to paste (avoids SIGINT collision with Ctrl+C).
+// Bracketed paste mode is enabled to safely handle multi-line clipboard content.
 func TooeyApp(apiURL string, topK int, tradeoffPreference string) *app.App {
 	mdl := NewModel(apiURL, topK, tradeoffPreference)
 	mdl.needsInitialHealthCheck = true
@@ -95,6 +97,9 @@ func TooeyApp(apiURL string, topK int, tradeoffPreference string) *app.App {
 	return &app.App{
 		Init: func() interface{} {
 			mdl.width, mdl.height = input.TermSize()
+			// Enable bracketed paste mode (\x1b[?2004h): terminal wraps pastes with \x1b[200~ ... \x1b[201~
+			// This signals the app to treat pasted text as a single block, preventing format breaks
+			fmt.Print("\x1b[?2004h")
 			return mdl
 		},
 		Update: func(m interface{}, msg app.Msg) app.UpdateResult {

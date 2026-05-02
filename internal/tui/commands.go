@@ -288,6 +288,10 @@ func formatHelpText() string {
  /help                  — Show this help
  /quit                  — Exit Promptee
 
+ Clipboard (safe keybindings):
+   Ctrl+Shift+C         — Copy selected prompt to system clipboard
+   Ctrl+Shift+V         — Paste from clipboard into input (bracketed paste mode)
+
  Type anything else to search for prompt recommendations.
  After results appear, press 1-9 to select one.`
 }
