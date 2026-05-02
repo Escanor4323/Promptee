@@ -308,11 +308,13 @@ func (m *Model) handleKey(key app.KeyMsg) app.UpdateResult {
 
 	case input.CmdV: // macOS Command+V
 		if !m.thinking {
-			// Try to read from clipboard and paste into input
+			// Read from clipboard and paste into input
 			cmd := exec.Command("pbpaste")
 			output, err := cmd.Output()
 			if err == nil {
-				m.chatInput.Value += string(output)
+				pastedText := string(output)
+				// Preserve newlines but paste as-is from clipboard
+				m.chatInput.Value += pastedText
 			}
 		}
 		return app.NoCmd(m)
