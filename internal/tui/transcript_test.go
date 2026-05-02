@@ -154,6 +154,17 @@ func TestTranscript_Render_Truncation(t *testing.T) {
 	}
 }
 
+func TestUserMsgSegment_Render(t *testing.T) {
+	s := UserMsgSegment{Text: "find me a prompt"}
+	got := s.Render()
+	if !strings.HasPrefix(got, "❯ ") {
+		t.Errorf("expected ❯ prefix, got %q", got)
+	}
+	if !strings.Contains(got, "find me a prompt") {
+		t.Error("expected message content in render output")
+	}
+}
+
 func TestResultsToItems(t *testing.T) {
 	results := []api.RecommendResult{
 		{ID: 1, Title: "A", HybridScore: 0.9, Variables: []string{"X"}, FullText: "text"},

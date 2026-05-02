@@ -288,7 +288,7 @@ type UserMsgSegment struct {
 }
 
 func (s UserMsgSegment) Render() string {
-	return "> " + s.Text
+	return "❯ " + s.Text
 }
 
 func (s UserMsgSegment) NodeRender() node.Node {
@@ -297,9 +297,9 @@ func (s UserMsgSegment) NodeRender() node.Node {
 	for i, line := range lines {
 		prefix := "    "
 		if i == 0 {
-			prefix = "  > "
+			prefix = "  ❯ "
 		}
-		children = append(children, node.TextStyled(prefix+line, colBrGreen, colorDefault, node.Bold))
+		children = append(children, node.TextStyled(prefix+line, colDimGray, colorDefault, 0))
 	}
 	if len(children) == 1 {
 		return children[0]
