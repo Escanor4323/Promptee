@@ -290,7 +290,7 @@ func (m *Model) handleKey(key app.KeyMsg) app.UpdateResult {
 			cmd := exec.Command("pbpaste")
 			output, err := cmd.Output()
 			if err == nil {
-				m.chatInput.Value += string(output)
+				m.chatInput = m.chatInput.Paste(string(output))
 			}
 		}
 		return app.NoCmd(m)
@@ -313,8 +313,8 @@ func (m *Model) handleKey(key app.KeyMsg) app.UpdateResult {
 			output, err := cmd.Output()
 			if err == nil {
 				pastedText := string(output)
-				// Preserve newlines but paste as-is from clipboard
-				m.chatInput.Value += pastedText
+				// Use Paste() to properly update cursor position
+				m.chatInput = m.chatInput.Paste(pastedText)
 			}
 		}
 		return app.NoCmd(m)
@@ -334,7 +334,7 @@ func (m *Model) handleKey(key app.KeyMsg) app.UpdateResult {
 
 	case input.Paste:
 		if !m.thinking {
-			m.chatInput.Value += key.Key.Text
+			m.chatInput = m.chatInput.Paste(key.Key.Text)
 		}
 		return app.NoCmd(m)
 
@@ -352,7 +352,7 @@ func (m *Model) handleKey(key app.KeyMsg) app.UpdateResult {
 
 	case input.ShiftEnter:
 		if !m.thinking {
-			m.chatInput.Value += "\n"
+			m.chatInput = m.chatInput.Paste("\n")
 		}
 		return app.NoCmd(m)
 
