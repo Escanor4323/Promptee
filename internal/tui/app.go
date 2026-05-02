@@ -55,6 +55,8 @@ type Model struct {
 	lastSeg                  *RecommendSegment
 	healthCheckCounter       int
 	needsInitialHealthCheck  bool
+	needsDashboardLoad       bool
+	dashboardDisplayed       bool
 	selectedItem             RecommendItem
 	varsToFill               []string
 	varFillIdx               int
@@ -89,6 +91,7 @@ func NewModel(apiURL string, topK int, tradeoffPreference string) *Model {
 func TooeyApp(apiURL string, topK int, tradeoffPreference string) *app.App {
 	mdl := NewModel(apiURL, topK, tradeoffPreference)
 	mdl.needsInitialHealthCheck = true
+	mdl.needsDashboardLoad = true
 	return &app.App{
 		Init: func() interface{} {
 			mdl.width, mdl.height = input.TermSize()
@@ -145,30 +148,31 @@ func (m *Model) update(msg app.Msg) app.UpdateResult {
 
 	case healthResultMsg:
 		m.backendOnline = msg.err == nil
-		if msg.explicit {
+		if m.needsDashboardLoad {
+			m.needsDashboardLoad = false
 			if m.backendOnline {
-				m.convo.Add(TextSegment{Text: "[ok] Backend online"})
+				if msg.explicit {
+					m.convo.Add(TextSegment{Text: "[ok] Backend online"})
+				}
 				return app.UpdateResult{
 					Model: m,
 					Cmds: []app.Cmd{
+						func() app.Msg { return doGetTelemetrySummary(m.client) },
 						func() app.Msg { return doFetchModels(m.client) },
 					},
 				}
 			} else {
-				m.convo.Add(ErrorSegment{Message: "Backend offline"})
+				m.convo.Add(ErrorSegment{Message: "Backend offline -- run /daemon start or ./promptee daemon start"})
+				m.convo.Add(TextSegment{Text: ""})
+				m.convo.Add(SplashArtSegment{Text: splashArt})
+				m.convo.Add(TextSegment{Text: " Promptee — Local MLOps & RAG CLI (Codename: Daedalus)"})
+				m.convo.Add(TextSegment{Text: ""})
 			}
-		} else if !m.backendOnline {
-			m.convo.Add(ErrorSegment{Message: "Backend offline -- run /daemon start or ./promptee daemon start"})
-			m.convo.Add(TextSegment{Text: ""})
-			m.convo.Add(SplashArtSegment{Text: splashArt})
-			m.convo.Add(TextSegment{Text: " Promptee — Local MLOps & RAG CLI (Codename: Daedalus)"})
-			m.convo.Add(TextSegment{Text: ""})
-		} else {
-			return app.UpdateResult{
-				Model: m,
-				Cmds: []app.Cmd{
-					func() app.Msg { return doFetchModels(m.client) },
-				},
+		} else if msg.explicit {
+			if m.backendOnline {
+				m.convo.Add(TextSegment{Text: "[ok] Backend online"})
+			} else {
+				m.convo.Add(ErrorSegment{Message: "Backend offline"})
 			}
 		}
 		return app.NoCmd(m)
@@ -200,6 +204,23 @@ func (m *Model) update(msg app.Msg) app.UpdateResult {
 		} else {
 			m.convo.Add(TextSegment{Text: "[ok] Feedback recorded"})
 		}
+		return app.NoCmd(m)
+
+	case telemetrySummaryResultMsg:
+		m.convo.RemoveFirst()
+		if msg.resp != nil {
+			m.convo.Add(DashboardSegment{
+				TotalExecutions: msg.resp.TotalExecutions,
+				AvgQualityScore: msg.resp.AvgQualityScore,
+				ByCategory:      msg.resp.ByCategory,
+				Percentages:     msg.resp.Percentages,
+			})
+		}
+		m.convo.Add(TextSegment{Text: ""})
+		m.convo.Add(SplashArtSegment{Text: splashArt})
+		m.convo.Add(TextSegment{Text: " Promptee — Local MLOps & RAG CLI (Codename: Daedalus)"})
+		m.convo.Add(TextSegment{Text: ""})
+		m.dashboardDisplayed = true
 		return app.NoCmd(m)
 
 	case modelsListResultMsg:
@@ -340,6 +361,10 @@ func (m *Model) handleKey(key app.KeyMsg) app.UpdateResult {
 func (m *Model) handleSubmit(text string) app.UpdateResult {
 	switch m.mode {
 	case modeQuery:
+		if m.dashboardDisplayed {
+			m.convo.RemoveFirst()
+			m.dashboardDisplayed = false
+		}
 		m.convo.Add(UserMsgSegment{Text: text})
 
 		if strings.TrimSpace(text) == "/copy" {
@@ -368,6 +393,16 @@ func (m *Model) handleSubmit(text string) app.UpdateResult {
 			m.mode = modeQuery
 			m.chatInput = component.NewTextInput("Type a query or /help for commands...")
 			m.spinner.SetStatus(StatusIdle, "")
+
+			if m.backendOnline {
+				m.needsDashboardLoad = true
+				return app.UpdateResult{
+					Model: m,
+					Cmds: []app.Cmd{
+						func() app.Msg { return doHealthCheckBg(m.client) },
+					},
+				}
+			}
 			return app.NoCmd(m)
 		}
 
