@@ -71,6 +71,7 @@ async def register_model(body: ModelRequest) -> ModelResponse:
         model = Model(name=body.name, type=body.type)
         session.add(model)
         await session.flush()
+        await session.commit()
 
         logger.info("Registered model: id=%d name=%s type=%s", model.id, model.name, model.type)
 
