@@ -110,6 +110,7 @@ type TelemetryRequest struct {
 	ContextWindowPct float64 `json:"context_window_pct"`
 	Verbosity        string  `json:"verbosity"`
 	AddonMode        string  `json:"addon_mode,omitempty"`
+	ModelID          string  `json:"model_id,omitempty"`
 }
 
 // TelemetryResponse is the parsed response from POST /api/v1/telemetry.
@@ -125,6 +126,7 @@ type TelemetryResponse struct {
 	TradeoffCost     float64 `json:"tradeoff_cost"`
 	TradeoffQuality  float64 `json:"tradeoff_quality"`
 	AddonMode        string  `json:"addon_mode,omitempty"`
+	ModelID          string  `json:"model_id,omitempty"`
 	ExecutedAt       string  `json:"executed_at"`
 }
 
@@ -133,6 +135,8 @@ type TelemetrySummaryResponse struct {
 	AvgQualityScore float64           `json:"avg_quality_score"`
 	ByCategory      map[string]int    `json:"by_category"`
 	Percentages     map[string]float64 `json:"percentages"`
+	ByModel         map[string]int    `json:"by_model"`
+	ModelQuality    map[string]float64 `json:"model_quality"`
 }
 
 // SubmitTelemetry sends execution telemetry to the backend and returns the response.

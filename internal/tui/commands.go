@@ -43,6 +43,11 @@ type simulateResponseMsg struct {
 	query string
 }
 
+type telemetrySummaryResultMsg struct {
+	resp *api.TelemetrySummaryResponse
+	err  error
+}
+
 type tickMsg time.Time
 
 // newTickCmd returns a Cmd that sends tickMsg after one second.
@@ -109,6 +114,13 @@ func doSubmitFeedback(client *api.Client, executionID int, qualityScore int, not
 func doSimulateResponse(query string) app.Msg {
 	time.Sleep(600 * time.Millisecond)
 	return simulateResponseMsg{query: query}
+}
+
+func doGetTelemetrySummary(client *api.Client) app.Msg {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	resp, err := client.GetTelemetrySummary(ctx)
+	return telemetrySummaryResultMsg{resp: resp, err: err}
 }
 
 type dispatchResult struct {

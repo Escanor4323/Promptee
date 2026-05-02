@@ -235,6 +235,54 @@ func (s SelectionSegment) NodeRender() node.Node {
 	return node.Column(children...)
 }
 
+type DashboardSegment struct {
+	TotalExecutions  int
+	AvgQualityScore  float64
+	ByCategory       map[string]int
+	Percentages      map[string]float64
+}
+
+func (s DashboardSegment) Render() string {
+	if s.ByCategory == nil {
+		s.ByCategory = make(map[string]int)
+	}
+	if s.Percentages == nil {
+		s.Percentages = make(map[string]float64)
+	}
+	var b strings.Builder
+	b.WriteString(">>> Usage Dashboard\n")
+	b.WriteString(fmt.Sprintf(" Total executions: %d\n", s.TotalExecutions))
+	b.WriteString(fmt.Sprintf(" Avg quality: %.2f\n", s.AvgQualityScore))
+	b.WriteString(" By category:\n")
+	for _, cat := range []string{"speed", "cost", "quality", "balanced"} {
+		count := s.ByCategory[cat]
+		pct := s.Percentages[cat]
+		b.WriteString(fmt.Sprintf("  %s: %d (%.1f%%)\n", cat, count, pct))
+	}
+	return b.String()
+}
+
+func (s DashboardSegment) NodeRender() node.Node {
+	if s.ByCategory == nil {
+		s.ByCategory = make(map[string]int)
+	}
+	if s.Percentages == nil {
+		s.Percentages = make(map[string]float64)
+	}
+	children := []node.Node{
+		node.TextStyled(">>> Usage Dashboard", colorBlue, colorDefault, node.Bold),
+		node.Text(fmt.Sprintf(" Total executions: %d", s.TotalExecutions)),
+		node.Text(fmt.Sprintf(" Avg quality: %.2f", s.AvgQualityScore)),
+		node.Text(" By category:"),
+	}
+	for _, cat := range []string{"speed", "cost", "quality", "balanced"} {
+		count := s.ByCategory[cat]
+		pct := s.Percentages[cat]
+		children = append(children, node.Text(fmt.Sprintf("  %s: %d (%.1f%%)", cat, count, pct)))
+	}
+	return node.Column(children...)
+}
+
 type UserMsgSegment struct {
 	Text string
 }
@@ -350,7 +398,6 @@ type Transcript struct {
 
 func NewTranscript() *Transcript {
 	t := &Transcript{charLimit: 10000}
-	t.Add(TextSegment{Text: splashArt})
 	return t
 }
 

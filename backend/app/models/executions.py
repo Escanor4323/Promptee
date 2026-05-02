@@ -29,6 +29,7 @@ class Execution(Base):
     tradeoff_cost = Column(Float, default=0.0, nullable=False)
     tradeoff_quality = Column(Float, default=0.0, nullable=False)
     addon_mode = Column(String(64), nullable=True)  # "speed"|"quality"|"cost"|"balanced"
+    model_id = Column(String(128), nullable=True)  # "claude-opus-4-7"|"claude-sonnet-4-6"|etc
     executed_at = Column(DateTime, server_default=func.now(), nullable=False)
 
     template = relationship("Template", back_populates="executions", lazy="selectin")

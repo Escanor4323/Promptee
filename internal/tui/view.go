@@ -43,11 +43,11 @@ func (m *Model) view(focused string) node.Node {
 	if highlighted, ok := renderCommandInput(m.chatInput.Value); ok {
 		inputLine = highlighted
 	} else {
-		inputLine = m.chatInput.Render("  > ", colWhite, colorDefault, 0)
+		inputLine = m.chatInput.Render("  ❯ ", colWhite, colorDefault, 0)
 		if m.mode == modeQuery && m.chatInput.Value == "" {
 			inputLine = node.Row(
 				node.TextStyled("  ", colWhite, colorDefault, 0),
-				node.TextStyled("$", colOrange, colorDefault, node.Bold),
+				node.TextStyled("❯", colWhite, colorDefault, node.Bold),
 				node.Text(" "),
 			)
 		}

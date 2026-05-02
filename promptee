@@ -25,6 +25,7 @@ build_project() {
   echo "🔨 Building Go binary..."
   make go-build > /dev/null 2>&1
   cp "$SCRIPT_DIR/bin/promptee" "$BIN"
+  chmod +x "$BIN"
   echo "  ✓ Binary built"
 
   # Run tests
@@ -35,16 +36,33 @@ build_project() {
   echo "✓ Build complete"
 }
 
+run_tui() {
+  if [ ! -f "$BIN" ] || [ ! -x "$BIN" ]; then
+    echo "Binary not found or not executable. Building..."
+    build_project
+  fi
+
+  # Ensure backend is running
+  if ! curl -s http://localhost:8000/api/v1/health > /dev/null 2>&1; then
+    echo "Starting backend..."
+    cd "$SCRIPT_DIR"
+    python3 -m uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 > /dev/null 2>&1 &
+    sleep 2
+  fi
+
+  exec "$BIN" "$@"
+}
+
 case "${1:-}" in
   "build")
     build_project
     ;;
   "")
     # No args - run TUI
-    "$BIN"
+    run_tui
     ;;
   *)
     # Pass through to binary
-    "$BIN" "$@"
+    run_tui "$@"
     ;;
 esac

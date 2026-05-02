@@ -1,0 +1,28 @@
+# github.com/inconshreveable/mousetrap v1.1.0
+## explicit; go 1.18
+github.com/inconshreveable/mousetrap
+# github.com/spf13/cobra v1.8.0
+## explicit; go 1.15
+github.com/spf13/cobra
+# github.com/spf13/pflag v1.0.5
+## explicit; go 1.12
+github.com/spf13/pflag
+# github.com/stukennedy/tooey v0.4.1
+## explicit; go 1.24.0
+github.com/stukennedy/tooey/ansi
+github.com/stukennedy/tooey/app
+github.com/stukennedy/tooey/cell
+github.com/stukennedy/tooey/component
+github.com/stukennedy/tooey/diff
+github.com/stukennedy/tooey/focus
+github.com/stukennedy/tooey/input
+github.com/stukennedy/tooey/layout
+github.com/stukennedy/tooey/node
+# golang.org/x/sys v0.40.0
+## explicit; go 1.24.0
+golang.org/x/sys/plan9
+golang.org/x/sys/unix
+golang.org/x/sys/windows
+# golang.org/x/term v0.39.0
+## explicit; go 1.24.0
+golang.org/x/term

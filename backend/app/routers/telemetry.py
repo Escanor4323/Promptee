@@ -49,6 +49,9 @@ class TelemetryRequest(BaseModel):
     addon_mode: Optional[str] = Field(
         None, description="AddOn mode: speed | quality | cost | balanced"
     )
+    model_id: Optional[str] = Field(
+        None, description="Model identifier (e.g., claude-opus-4-7, claude-sonnet-4-6)"
+    )
 
     @field_validator("verbosity")
     @classmethod
@@ -83,6 +86,7 @@ class TelemetryResponse(BaseModel):
     tradeoff_cost: float
     tradeoff_quality: float
     addon_mode: Optional[str]
+    model_id: Optional[str]
     executed_at: str
 
     model_config = ConfigDict(from_attributes=True)
@@ -166,6 +170,7 @@ async def create_telemetry(body: TelemetryRequest) -> TelemetryResponse:
             tradeoff_cost=cost,
             tradeoff_quality=quality,
             addon_mode=body.addon_mode,
+            model_id=body.model_id,
         )
         session.add(execution)
         await session.flush()
@@ -192,6 +197,7 @@ async def create_telemetry(body: TelemetryRequest) -> TelemetryResponse:
             tradeoff_cost=execution.tradeoff_cost,
             tradeoff_quality=execution.tradeoff_quality,
             addon_mode=execution.addon_mode,
+            model_id=execution.model_id,
             executed_at=str(execution.executed_at),
         )
 
@@ -291,6 +297,28 @@ async def get_telemetry_summary():
                 round(100 * count / total, 1) if total > 0 else 0.0
             )
 
+        # Executions by model
+        stmt = (
+            select(Execution.model_id, func.count(Execution.id).label("count"))
+            .group_by(Execution.model_id)
+        )
+        result = await session.execute(stmt)
+        model_counts = {(row[0] or "unknown"): row[1] for row in result.fetchall()}
+
+        # Average quality by model
+        model_quality = {}
+        stmt = select(
+            Execution.model_id,
+            func.avg(Feedback.quality_score).label("avg_quality"),
+        )
+        stmt = stmt.join(
+            Feedback, Feedback.execution_id == Execution.id, isouter=True
+        ).group_by(Execution.model_id)
+        result = await session.execute(stmt)
+        for model_id, avg_q in result.fetchall():
+            model_key = model_id or "unknown"
+            model_quality[model_key] = round(float(avg_q), 1) if avg_q else 0.0
+
         return {
             "total_executions": total,
             "avg_quality_score": round(avg_quality, 1),
@@ -301,4 +329,6 @@ async def get_telemetry_summary():
                 "balanced": categories["balanced"],
             },
             "percentages": percentages,
+            "by_model": model_counts,
+            "model_quality": model_quality,
         }
