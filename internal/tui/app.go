@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"os/exec"
 	"strconv"
 	"strings"
 
@@ -292,11 +291,11 @@ func (m *Model) handleKey(key app.KeyMsg) app.UpdateResult {
 
 	case input.CtrlShiftV:
 		if !m.thinking {
-			// Try to read from clipboard and paste into input
-			cmd := exec.Command("pbpaste")
-			output, err := cmd.Output()
-			if err == nil {
-				m.chatInput = m.chatInput.Paste(string(output))
+			text, err := pasteFromClipboard()
+			if err != nil {
+				m.convo.Add(ErrorSegment{Message: fmt.Sprintf("Paste failed: %v", err)})
+			} else if text != "" {
+				m.chatInput = m.chatInput.Paste(text)
 			}
 		}
 		return app.NoCmd(m)
@@ -314,13 +313,11 @@ func (m *Model) handleKey(key app.KeyMsg) app.UpdateResult {
 
 	case input.CmdV: // macOS Command+V
 		if !m.thinking {
-			// Read from clipboard and paste into input
-			cmd := exec.Command("pbpaste")
-			output, err := cmd.Output()
-			if err == nil {
-				pastedText := string(output)
-				// Use Paste() to properly update cursor position
-				m.chatInput = m.chatInput.Paste(pastedText)
+			text, err := pasteFromClipboard()
+			if err != nil {
+				m.convo.Add(ErrorSegment{Message: fmt.Sprintf("Paste failed: %v", err)})
+			} else if text != "" {
+				m.chatInput = m.chatInput.Paste(text)
 			}
 		}
 		return app.NoCmd(m)

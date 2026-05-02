@@ -365,4 +365,23 @@ func copyToClipboard(text string) error {
 	return cmd.Run()
 }
 
+func pasteFromClipboard() (string, error) {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("pbpaste")
+	case "linux":
+		cmd = exec.Command("xclip", "-selection", "clipboard", "-o")
+	case "windows":
+		cmd = exec.Command("powershell", "-Command", "Get-Clipboard")
+	default:
+		return "", fmt.Errorf("clipboard not supported on %s", runtime.GOOS)
+	}
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("paste failed: %w", err)
+	}
+	return string(output), nil
+}
+
 var _ = fmt.Sprintf
