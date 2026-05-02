@@ -239,6 +239,8 @@ func dispatchCommand(input string, client *api.Client, topK int, tradeoffPrefere
 		}
 	case "/clear":
 		return dispatchResult{msg: "__clear__"}
+	case "/test-clipboard":
+		return dispatchResult{msg: formatClipboardDiagnostics()}
 	case "/help":
 		return dispatchResult{msg: formatHelpText()}
 	case "/quit":
@@ -345,6 +347,43 @@ func formatDaemonHelp(arg string) string {
 	default:
 		return "Usage: /daemon start|stop|status"
 	}
+}
+
+func formatClipboardDiagnostics() string {
+	// Test paste function
+	text, err := pasteFromClipboard()
+	var pasteStatus string
+	if err != nil {
+		pasteStatus = fmt.Sprintf("❌ Paste failed: %v", err)
+	} else if text == "" {
+		pasteStatus = "⚠ Clipboard is empty"
+	} else {
+		pasteStatus = fmt.Sprintf("✓ Clipboard has %d bytes: %q", len(text), text[:min(len(text), 50)])
+	}
+
+	copyKey, pasteKey := getClipboardKeybindings()
+	return fmt.Sprintf(`**Clipboard Diagnostics**
+
+Platform: %s (uses %s for paste, %s for copy)
+
+Paste Status: %s
+
+**How to test:**
+1. Copy something to clipboard: %s+C (or use your OS copy)
+2. In Promptee, press: %s
+3. Check if text appears in the input field
+
+If nothing appears, the issue is likely:
+- Keyboard shortcut not being detected by terminal
+- Terminal not forwarding the key event to the app
+- Try using /paste command instead (manual paste via bracketed paste)`, runtime.GOOS, pasteKey, copyKey, pasteStatus, copyKey, pasteKey)
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func copyToClipboard(text string) error {
