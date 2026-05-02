@@ -8,6 +8,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.app.config import get_settings
 from backend.app.db.sqlite import init_db
+# Import all models to ensure tables are created during init_db()
+from backend.app.models import Execution, Feedback, Model, ModelPreference, Template  # noqa: F401
 from backend.app.routers.health import router as health_router
 from backend.app.routers.ingest import router as ingest_router
 from backend.app.routers.models import router as models_router
