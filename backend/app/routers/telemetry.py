@@ -251,7 +251,7 @@ async def create_feedback(body: FeedbackRequest) -> FeedbackResponse:
         )
 
 
-@router.get("/summary")
+@router.get("/telemetry/summary")
 async def get_telemetry_summary():
     """Get aggregated telemetry: execution counts by category and avg quality."""
     from sqlalchemy import func, select
