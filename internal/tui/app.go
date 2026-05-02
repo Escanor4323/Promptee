@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"os/exec"
 	"strconv"
 	"strings"
 
@@ -54,7 +55,8 @@ type Model struct {
 	lastSeg                  *RecommendSegment
 	healthCheckCounter       int
 	needsInitialHealthCheck  bool
-	firstSubmissionDone      bool
+	needsDashboardLoad       bool
+	dashboardDisplayed       bool
 	selectedItem             RecommendItem
 	varsToFill               []string
 	varFillIdx               int
@@ -85,12 +87,10 @@ func NewModel(apiURL string, topK int, tradeoffPreference string) *Model {
 func TooeyApp(apiURL string, topK int, tradeoffPreference string) *app.App {
 	mdl := NewModel(apiURL, topK, tradeoffPreference)
 	mdl.needsInitialHealthCheck = true
+	mdl.needsDashboardLoad = true
 	return &app.App{
 		Init: func() interface{} {
 			mdl.width, mdl.height = input.TermSize()
-			mdl.convo.Add(SplashArtSegment{Text: splashArt})
-			mdl.convo.Add(TextSegment{Text: " Promptee — Local MLOps & RAG CLI (Codename: Daedalus)"})
-			mdl.convo.Add(TextSegment{Text: ""})
 			return mdl
 		},
 		Update: func(m interface{}, msg app.Msg) app.UpdateResult {
@@ -106,9 +106,15 @@ func TooeyApp(apiURL string, topK int, tradeoffPreference string) *app.App {
 func (m *Model) update(msg app.Msg) app.UpdateResult {
 	if m.needsInitialHealthCheck {
 		m.needsInitialHealthCheck = false
-		return app.WithCmd(m, func() app.Msg {
-			return doHealthCheckBg(m.client)
-		})
+		return app.UpdateResult{
+			Model: m,
+			Cmds: []app.Cmd{
+				func() app.Msg {
+					return doHealthCheckBg(m.client)
+				},
+				newTickCmd,
+			},
+		}
 	}
 
 	switch msg := msg.(type) {
@@ -138,11 +144,29 @@ func (m *Model) update(msg app.Msg) app.UpdateResult {
 
 	case healthResultMsg:
 		m.backendOnline = msg.err == nil
-		if msg.explicit {
+		if m.needsDashboardLoad {
+			m.needsDashboardLoad = false
+			if m.backendOnline {
+				if msg.explicit {
+					m.convo.Add(TextSegment{Text: "[ok] Backend online"})
+				} else {
+					m.convo.Add(TextSegment{Text: " Loading dashboard..."})
+				}
+				return app.WithCmd(m, func() app.Msg {
+					return doGetTelemetrySummary(m.client)
+				})
+			} else {
+				m.convo.Add(ErrorSegment{Message: "Backend offline -- run /daemon start or ./promptee daemon start"})
+				m.convo.Add(TextSegment{Text: ""})
+				m.convo.Add(SplashArtSegment{Text: splashArt})
+				m.convo.Add(TextSegment{Text: " Promptee — Local MLOps & RAG CLI (Codename: Daedalus)"})
+				m.convo.Add(TextSegment{Text: ""})
+			}
+		} else if msg.explicit {
 			if m.backendOnline {
 				m.convo.Add(TextSegment{Text: "[ok] Backend online"})
 			} else {
-				m.convo.Add(ErrorSegment{Message: "Backend offline -- run /daemon start or ./promptee daemon start"})
+				m.convo.Add(ErrorSegment{Message: "Backend offline"})
 			}
 		}
 		return app.NoCmd(m)
@@ -176,6 +200,27 @@ func (m *Model) update(msg app.Msg) app.UpdateResult {
 		}
 		return app.NoCmd(m)
 
+	case telemetrySummaryResultMsg:
+		m.convo.RemoveFirst()
+		if msg.resp != nil {
+			m.convo.Add(DashboardSegment{
+				TotalExecutions: msg.resp.TotalExecutions,
+				AvgQualityScore: msg.resp.AvgQualityScore,
+				ByCategory:      msg.resp.ByCategory,
+				Percentages:     msg.resp.Percentages,
+			})
+		} else if msg.err != nil {
+			m.convo.Add(TextSegment{Text: "[!] Dashboard: " + msg.err.Error()})
+		} else {
+			m.convo.Add(TextSegment{Text: "[!] Dashboard: No data available"})
+		}
+		m.convo.Add(TextSegment{Text: ""})
+		m.convo.Add(SplashArtSegment{Text: splashArt})
+		m.convo.Add(TextSegment{Text: " Promptee — Local MLOps & RAG CLI (Codename: Daedalus)"})
+		m.convo.Add(TextSegment{Text: ""})
+		m.dashboardDisplayed = true
+		return app.NoCmd(m)
+
 	case tickMsg:
 		if m.spinner.Kind != StatusIdle && m.spinner.Kind != StatusComplete {
 			m.spinner.Tick()
@@ -202,6 +247,28 @@ func (m *Model) handleKey(key app.KeyMsg) app.UpdateResult {
 	switch key.Key.Type {
 	case input.CtrlC:
 		return app.UpdateResult{Model: nil}
+
+	case input.CtrlShiftC:
+		if m.lastSeg != nil && m.selectedItem.FullText != "" {
+			filled := formatFinalPrompt(m.selectedItem, m.varValues)
+			if err := copyToClipboard(filled); err != nil {
+				m.convo.Add(ErrorSegment{Message: fmt.Sprintf("Failed to copy: %v", err)})
+			} else {
+				m.convo.Add(TextSegment{Text: "✓ Prompt copied to clipboard"})
+			}
+		}
+		return app.NoCmd(m)
+
+	case input.CtrlShiftV:
+		if !m.thinking {
+			// Try to read from clipboard and paste into input
+			cmd := exec.Command("pbpaste")
+			output, err := cmd.Output()
+			if err == nil {
+				m.chatInput.Value += string(output)
+			}
+		}
+		return app.NoCmd(m)
 
 	case input.RuneKey:
 		if num, ok := numKeyTypes[key.Key.Rune]; ok && m.mode == modeQuery && m.lastSeg != nil {
@@ -274,9 +341,9 @@ func (m *Model) handleKey(key app.KeyMsg) app.UpdateResult {
 func (m *Model) handleSubmit(text string) app.UpdateResult {
 	switch m.mode {
 	case modeQuery:
-		if !m.firstSubmissionDone {
+		if m.dashboardDisplayed {
 			m.convo.RemoveFirst()
-			m.firstSubmissionDone = true
+			m.dashboardDisplayed = false
 		}
 		m.convo.Add(UserMsgSegment{Text: text})
 
@@ -290,6 +357,27 @@ func (m *Model) handleSubmit(text string) app.UpdateResult {
 				} else {
 					m.convo.Add(TextSegment{Text: "[ok] Prompt copied to clipboard"})
 				}
+			}
+			return app.NoCmd(m)
+		}
+
+		if strings.TrimSpace(text) == "/clean" {
+			m.convo = NewTranscript()
+			m.lastSeg = nil
+			m.selectedItem = RecommendItem{}
+			m.varValues = make(map[string]string)
+			m.varFillIdx = 0
+			m.lastTemplateID = 0
+			m.lastExecutionID = 0
+			m.availableAddons = nil
+			m.mode = modeQuery
+			m.chatInput = component.NewTextInput("Type a query or /help for commands...")
+			m.spinner.SetStatus(StatusIdle, "")
+
+			if m.backendOnline {
+				return app.WithCmd(m, func() app.Msg {
+					return doGetTelemetrySummary(m.client)
+				})
 			}
 			return app.NoCmd(m)
 		}
