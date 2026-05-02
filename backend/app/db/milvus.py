@@ -79,20 +79,40 @@ def get_or_create_collection() -> Collection:
 def insert_chunks(chunks: list, embeddings: list, template_ids: list[int]) -> list[int]:
     """Insert chunked documents with their embeddings into Milvus.
 
+    Data is built as a list of row-level dicts (field_name -> value) so
+    pymilvus binds values to the schema by name rather than positional
+    column order. The auto_id `id` field is intentionally omitted.
+
     Returns list of inserted IDs.
     """
     collection = get_or_create_collection()
 
-    titles = [c.title for c in chunks]
-    objectives = [c.objective for c in chunks]
-    full_texts = [c.full_text for c in chunks]
-    variables = [json.dumps(c.variables) for c in chunks]
+    if len(chunks) != len(template_ids):
+        raise ValueError(
+            f"insert_chunks: len(chunks)={len(chunks)} != len(template_ids)={len(template_ids)}"
+        )
+    if len(chunks) != len(embeddings):
+        raise ValueError(
+            f"insert_chunks: len(chunks)={len(chunks)} != len(embeddings)={len(embeddings)}"
+        )
 
-    data = [template_ids, embeddings, titles, objectives, full_texts, variables]
-    result = collection.insert(data)
+    rows: list[dict] = []
+    for chunk, embedding, template_id in zip(chunks, embeddings, template_ids):
+        # Convert numpy arrays to plain python lists for pymilvus compatibility.
+        vector = embedding.tolist() if hasattr(embedding, "tolist") else list(embedding)
+        rows.append({
+            "template_id": int(template_id),
+            "vector": vector,
+            "title": chunk.title,
+            "objective": chunk.objective,
+            "full_text": chunk.full_text,
+            "variables": json.dumps(chunk.variables),
+        })
+
+    result = collection.insert(rows)
     collection.flush()
-    logger.info("Inserted %d chunks into Milvus", len(chunks))
-    return result.primary_keys
+    logger.info("Inserted %d chunks into Milvus", len(rows))
+    return list(result.primary_keys)
 
 
 def search(query_vector, top_k: int = 10) -> list[dict]:
