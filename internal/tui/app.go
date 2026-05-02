@@ -145,6 +145,12 @@ func (m *Model) update(msg app.Msg) app.UpdateResult {
 		m.chatInput.Focused = msg.Focused
 		return app.NoCmd(m)
 
+	case app.PasteMsg:
+		if !m.thinking {
+			m.chatInput = m.chatInput.Paste(msg.Text)
+		}
+		return app.NoCmd(m)
+
 	case recommendResultMsg:
 		return m.handleRecommendResult(msg)
 
