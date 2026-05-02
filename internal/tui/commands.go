@@ -277,8 +277,8 @@ func formatHelpText() string {
 	return `Available commands:
  /ingest <path>         — Ingest file/directory into vector store
  /ingest-batch <paths>  — Ingest multiple space-separated paths
- /model <name>          — Register and switch to a model
- /add-model <name>      — Add a new model for use
+ /model <name>          — Switch active model for telemetry tracking
+ /add-model <name>      — Register new model in backend
  /copy                  — Copy filled prompt to clipboard
  /telemetry             — Show telemetry info
  /feedback <1-5>        — Rate last execution (1-5 stars)
