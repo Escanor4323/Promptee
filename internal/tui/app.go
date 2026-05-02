@@ -66,6 +66,8 @@ type Model struct {
 	lastTemplateID           int
 	lastExecutionID          int
 	lastAddonMode            string
+	currentModel             string
+	availableModels          []string
 	thinking                 bool
 }
 
@@ -80,6 +82,8 @@ func NewModel(apiURL string, topK int, tradeoffPreference string) *Model {
 		tradeoffPreference: tradeoffPreference,
 		mode:              modeQuery,
 		varValues:         make(map[string]string),
+		currentModel:      "claude-opus-4-7",
+		availableModels:   []string{"claude-opus-4-7", "claude-sonnet-4-6"},
 	}
 }
 
@@ -152,9 +156,13 @@ func (m *Model) update(msg app.Msg) app.UpdateResult {
 				} else {
 					m.convo.Add(TextSegment{Text: " Loading dashboard..."})
 				}
-				return app.WithCmd(m, func() app.Msg {
-					return doGetTelemetrySummary(m.client)
-				})
+				return app.UpdateResult{
+					Model: m,
+					Cmds: []app.Cmd{
+						func() app.Msg { return doGetTelemetrySummary(m.client) },
+						func() app.Msg { return doFetchModels(m.client) },
+					},
+				}
 			} else {
 				m.convo.Add(ErrorSegment{Message: "Backend offline -- run /daemon start or ./promptee daemon start"})
 				m.convo.Add(TextSegment{Text: ""})
@@ -219,6 +227,24 @@ func (m *Model) update(msg app.Msg) app.UpdateResult {
 		m.convo.Add(TextSegment{Text: " Promptee — Local MLOps & RAG CLI (Codename: Daedalus)"})
 		m.convo.Add(TextSegment{Text: ""})
 		m.dashboardDisplayed = true
+		return app.NoCmd(m)
+
+	case modelsListResultMsg:
+		if msg.err != nil {
+			m.convo.Add(ErrorSegment{Message: fmt.Sprintf("failed to fetch models: %s", msg.err.Error())})
+		} else if msg.models != nil && len(msg.models) > 0 {
+			m.availableModels = msg.models
+			m.convo.Add(TextSegment{Text: fmt.Sprintf("[ok] Loaded %d models", len(msg.models))})
+		}
+		return app.NoCmd(m)
+
+	case modelRegisterResultMsg:
+		if msg.err != nil {
+			m.convo.Add(ErrorSegment{Message: fmt.Sprintf("failed to register model: %s", msg.err.Error())})
+		} else if msg.model != nil {
+			m.currentModel = msg.model.Name
+			m.convo.Add(TextSegment{Text: fmt.Sprintf("[ok] Model registered: %s", msg.model.Name)})
+		}
 		return app.NoCmd(m)
 
 	case tickMsg:
@@ -448,7 +474,7 @@ func (m *Model) handleRecommendResult(msg recommendResultMsg) app.UpdateResult {
 		latencyMs = m.timer.ElapsedMs()
 	}
 	return app.WithCmd(m, func() app.Msg {
-		return doSubmitTelemetry(m.client, m.lastTemplateID, latencyMs, m.tradeoffPreference)
+		return doSubmitTelemetry(m.client, m.lastTemplateID, latencyMs, m.tradeoffPreference, m.currentModel)
 	})
 }
 

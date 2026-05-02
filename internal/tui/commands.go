@@ -48,6 +48,16 @@ type telemetrySummaryResultMsg struct {
 	err  error
 }
 
+type modelsListResultMsg struct {
+	models []string
+	err    error
+}
+
+type modelRegisterResultMsg struct {
+	model *api.ModelResponse
+	err   error
+}
+
 type tickMsg time.Time
 
 // newTickCmd returns a Cmd that sends tickMsg after one second.
@@ -88,7 +98,7 @@ func doHealthCheckBg(client *api.Client) app.Msg {
 	return healthResultMsg{err: client.CheckHealth(), explicit: false}
 }
 
-func doSubmitTelemetry(client *api.Client, templateID int, latencyMs float64, addonMode string) app.Msg {
+func doSubmitTelemetry(client *api.Client, templateID int, latencyMs float64, addonMode, modelID string) app.Msg {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	resp, err := client.SubmitTelemetry(ctx, api.TelemetryRequest{
@@ -96,6 +106,7 @@ func doSubmitTelemetry(client *api.Client, templateID int, latencyMs float64, ad
 		LatencyMs:  latencyMs,
 		Verbosity:  "moderate",
 		AddonMode:  addonMode,
+		ModelID:    modelID,
 	})
 	return telemetryResultMsg{resp: resp, err: err}
 }
@@ -121,6 +132,20 @@ func doGetTelemetrySummary(client *api.Client) app.Msg {
 	defer cancel()
 	resp, err := client.GetTelemetrySummary(ctx)
 	return telemetrySummaryResultMsg{resp: resp, err: err}
+}
+
+func doFetchModels(client *api.Client) app.Msg {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	models, err := client.ListModels(ctx)
+	return modelsListResultMsg{models: models, err: err}
+}
+
+func doRegisterModel(client *api.Client, name, modelType string) app.Msg {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	model, err := client.RegisterModel(ctx, api.RegisterModelRequest{Name: name, Type: modelType})
+	return modelRegisterResultMsg{model: model, err: err}
 }
 
 type dispatchResult struct {
@@ -171,6 +196,22 @@ func dispatchCommand(input string, client *api.Client, topK int, tradeoffPrefere
 		return dispatchResult{msg: formatTelemetryHelp()}
 	case "/daemon":
 		return dispatchResult{msg: formatDaemonHelp(arg)}
+	case "/model":
+		if arg == "" {
+			return dispatchResult{msg: "Usage: /model <model-name> or /model to display current"}
+		}
+		return dispatchResult{
+			cmd: func() app.Msg { return doRegisterModel(client, arg, "claude") },
+			msg: "Registering model: " + arg,
+		}
+	case "/add-model":
+		if arg == "" {
+			return dispatchResult{msg: "Usage: /add-model <model-name>"}
+		}
+		return dispatchResult{
+			cmd: func() app.Msg { return doRegisterModel(client, arg, "claude") },
+			msg: "Adding model: " + arg,
+		}
 	case "/clear":
 		return dispatchResult{msg: "__clear__"}
 	case "/help":

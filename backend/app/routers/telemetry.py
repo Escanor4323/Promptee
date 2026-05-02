@@ -22,6 +22,7 @@ from backend.app.services.metrics import (
     compute_quality_score,
     compute_speed_score,
 )
+from backend.app.services.preferences import upsert_model_preference
 
 logger = logging.getLogger(__name__)
 
@@ -174,6 +175,15 @@ async def create_telemetry(body: TelemetryRequest) -> TelemetryResponse:
         )
         session.add(execution)
         await session.flush()
+
+        # Upsert model preference aggregates
+        if body.model_id:
+            await upsert_model_preference(
+                session=session,
+                template_id=body.template_id,
+                model_id=body.model_id,
+                addon_mode=body.addon_mode,
+            )
 
         logger.info(
             "Recorded telemetry: execution_id=%d template_id=%d "

@@ -257,3 +257,70 @@ func (c *Client) GetTelemetrySummary(ctx context.Context) (*TelemetrySummaryResp
 	}
 	return &result, nil
 }
+
+// ModelResponse is the response from GET/POST /api/v1/models.
+type ModelResponse struct {
+	ID        int    `json:"id"`
+	Name      string `json:"name"`
+	Type      string `json:"type"`
+	CreatedAt string `json:"created_at"`
+}
+
+// RegisterModelRequest is the body for POST /api/v1/models.
+type RegisterModelRequest struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
+
+// ListModels fetches all registered models from the backend.
+func (c *Client) ListModels(ctx context.Context) ([]string, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/api/v1/models", nil)
+	if err != nil {
+		return nil, fmt.Errorf("create list models request: %w", err)
+	}
+	resp, err := c.HTTPClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("list models request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("list models returned status %d: %s", resp.StatusCode, string(body))
+	}
+	var models []ModelResponse
+	if err := json.NewDecoder(resp.Body).Decode(&models); err != nil {
+		return nil, fmt.Errorf("decode list models response: %w", err)
+	}
+	names := make([]string, len(models))
+	for i, m := range models {
+		names[i] = m.Name
+	}
+	return names, nil
+}
+
+// RegisterModel registers a new model with the backend.
+func (c *Client) RegisterModel(ctx context.Context, req RegisterModelRequest) (*ModelResponse, error) {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("marshal register model request: %w", err)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/api/v1/models", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("create register model request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	resp, err := c.HTTPClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("register model request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("register model returned status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+	var result ModelResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode register model response: %w", err)
+	}
+	return &result, nil
+}

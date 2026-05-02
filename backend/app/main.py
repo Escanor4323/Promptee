@@ -10,6 +10,8 @@ from backend.app.config import get_settings
 from backend.app.db.sqlite import init_db
 from backend.app.routers.health import router as health_router
 from backend.app.routers.ingest import router as ingest_router
+from backend.app.routers.models import router as models_router
+from backend.app.routers.preferences import router as preferences_router
 from backend.app.routers.recommend import router as recommend_router
 from backend.app.routers.telemetry import router as telemetry_router
 
@@ -42,6 +44,8 @@ def create_app() -> FastAPI:
     )
     app.include_router(health_router, prefix="/api/v1", tags=["health"])
     app.include_router(ingest_router, prefix="/api/v1", tags=["ingest"])
+    app.include_router(models_router, prefix="/api/v1", tags=["models"])
+    app.include_router(preferences_router, prefix="/api/v1", tags=["preferences"])
     app.include_router(recommend_router, prefix="/api/v1", tags=["recommend"])
     app.include_router(telemetry_router, prefix="/api/v1", tags=["telemetry"])
     return app

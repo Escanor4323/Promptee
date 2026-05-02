@@ -86,7 +86,7 @@ func (m *Model) statusRight() string {
 	if m.backendOnline {
 		backend = "online"
 	}
-	return fmt.Sprintf("backend:%s │ k:%d ", backend, m.topK)
+	return fmt.Sprintf("backend:%s │ k:%d │ model:%s ", backend, m.topK, m.currentModel)
 }
 
 // renderCommandInput colorizes a /command input line.

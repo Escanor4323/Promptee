@@ -12,6 +12,8 @@ Tradeoff Mapping:
 
 from backend.app.models.executions import Execution
 from backend.app.models.feedback import Feedback
+from backend.app.models.models import Model
+from backend.app.models.preferences import ModelPreference
 from backend.app.models.templates import Template
 
-__all__ = ["Execution", "Feedback", "Template"]
+__all__ = ["Execution", "Feedback", "Model", "ModelPreference", "Template"]

@@ -25,6 +25,7 @@ class Template(Base):
     updated_at = Column(DateTime, onupdate=func.now(), nullable=True)
 
     executions = relationship("Execution", back_populates="template", lazy="selectin")
+    preferences = relationship("ModelPreference", back_populates="template", lazy="selectin")
 
     def __repr__(self) -> str:
         return f"<Template id={self.id} title='{self.title}' milvus_id={self.milvus_id}>"
