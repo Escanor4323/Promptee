@@ -90,6 +90,14 @@ func doIngest(client *api.Client, path string) app.Msg {
 	return ingestResultMsg{resp: resp, err: err}
 }
 
+func doBatchIngest(client *api.Client, paths []string) app.Msg {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	req := api.IngestRequest{Paths: paths}
+	resp, err := client.Ingest(ctx, req)
+	return ingestResultMsg{resp: resp, err: err}
+}
+
 func doHealthCheck(client *api.Client) app.Msg {
 	return healthResultMsg{err: client.CheckHealth(), explicit: true}
 }
@@ -182,6 +190,15 @@ func dispatchCommand(input string, client *api.Client, topK int, tradeoffPrefere
 			cmd: func() app.Msg { return doIngest(client, arg) },
 			msg: "Ingesting: " + arg,
 		}
+	case "/ingest-batch":
+		if arg == "" {
+			return dispatchResult{msg: "Usage: /ingest-batch <path1> <path2> ..."}
+		}
+		paths := strings.Fields(arg)
+		return dispatchResult{
+			cmd: func() app.Msg { return doBatchIngest(client, paths) },
+			msg: fmt.Sprintf("Ingesting batch: %d paths", len(paths)),
+		}
 	case "/health":
 		return dispatchResult{
 			cmd: func() app.Msg { return doHealthCheck(client) },
@@ -258,15 +275,16 @@ func parseNumSelection(input string) (int, bool) {
 
 func formatHelpText() string {
 	return `Available commands:
- /ingest <path>     — Ingest file/directory into vector store
- /copy              — Copy filled prompt to clipboard
- /telemetry         — Show telemetry info
- /feedback <1-5>    — Rate last execution (1-5 stars)
+ /ingest <path>         — Ingest file/directory into vector store
+ /ingest-batch <paths>  — Ingest multiple space-separated paths
+ /copy                  — Copy filled prompt to clipboard
+ /telemetry             — Show telemetry info
+ /feedback <1-5>        — Rate last execution (1-5 stars)
  /daemon start|stop|status — Manage backend daemon
- /health            — Check backend health
- /clear             — Clear transcript
- /help              — Show this help
- /quit              — Exit Promptee
+ /health                — Check backend health
+ /clear                 — Clear transcript
+ /help                  — Show this help
+ /quit                  — Exit Promptee
 
  Type anything else to search for prompt recommendations.
  After results appear, press 1-9 to select one.`
