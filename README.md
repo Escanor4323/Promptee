@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/promptee_logo.png" alt="Promptee Logo" width="600" />
+  <img src="docs/assets/promptee_pet_logo.png" alt="Promptee Logo" width="600" />
 </p>
 
 ```text
