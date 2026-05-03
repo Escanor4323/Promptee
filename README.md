@@ -94,6 +94,22 @@ Inside the TUI, you can use the following commands:
 - `/copy` - (or `Cmd+C` / `Ctrl+Shift+C`) Send the filled template to your system clipboard.
 - `/clean` - Clear the current workspace and terminal screen.
 
+### Headless Agent Mode
+Promptee can be run headlessly for seamless integration into scripts, LLM agents, or automated pipelines without launching the TUI:
+
+```bash
+# Get recommendations for a query directly in standard output
+./promptee "write a robust python API" --agent
+
+# Output the results in raw JSON (perfect for Claude Code/Cursor integration)
+./promptee "write a robust python API" --agent --json
+
+# Control tradeoff and number of results
+./promptee "write a robust python API" --agent --json --top-k 3 --tradeoff speed
+```
+
+*Note: In agent mode, Promptee automatically injects the `[PROMPTEE_TRACE:...]` telemetry tokens into the output texts, ensuring your automated workflows remain trackable in the background!*
+
 ## 📊 Telemetry Architecture
 
 Promptee monitors your local LLM usage (like Claude Code) via asynchronous log tailing. It intercepts special `[PROMPTEE_TRACE:...]` tokens that are appended to the clipboard. The LLM ignores these trace tokens, but Promptee uses them to cross-reference actual execution latency, token counts, and session outcomes—feeding this data back into the Hybrid Reranker.
