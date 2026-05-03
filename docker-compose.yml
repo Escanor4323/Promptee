@@ -82,6 +82,29 @@ services:
     networks:
       - promptee_net
 
+  # FastAPI Backend Service (Promptee API)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - PG_HOST=postgres
+      - PG_PORT=5432
+      - PG_USER=${PG_USER:-promptee}
+      - PG_PASSWORD=${PG_PASSWORD:-promptee_password}
+      - PG_DATABASE=${PG_DATABASE:-promptee}
+      - MILVUS_HOST=milvus
+      - MILVUS_PORT=19530
+    depends_on:
+      postgres:
+        condition: service_healthy
+      milvus:
+        condition: service_healthy
+    networks:
+      - promptee_net
+
 volumes:
   postgres_data:
   etcd_data:

@@ -9,7 +9,7 @@ import json
 import logging
 from typing import Optional
 
-from pymilvus import Collection, CollectionSchema, DataType, FieldSchema, connections, utility
+from pymilvus import Collection, CollectionSchema, DataType, FieldSchema, MilvusException, connections, utility
 
 from backend.app.config import get_settings
 
@@ -121,6 +121,19 @@ def search(query_vector, top_k: int = 10) -> list[dict]:
     Returns list of dicts with: id, template_id, title, objective, full_text, variables, score.
     """
     collection = get_or_create_collection()
+
+    # Fast path: If the collection is completely empty or not yet loaded into the
+    # Milvus catalog, skip the search entirely.  `num_entities` can raise
+    # MilvusException("collection not found") on a freshly-created collection
+    # that has never had data inserted, so we treat any such error as empty.
+    try:
+        if collection.num_entities == 0:
+            logger.info("Milvus collection is empty. Returning 0 results.")
+            return []
+    except MilvusException as exc:
+        logger.info("Milvus collection not ready / empty (%s). Returning 0 results.", exc)
+        return []
+
     collection.load()
 
     search_params = {"metric_type": "COSINE", "params": {"nprobe": 16}}
