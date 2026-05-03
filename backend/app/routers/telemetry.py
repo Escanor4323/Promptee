@@ -13,16 +13,16 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.db.sqlite import async_session
-from backend.app.models.executions import Execution
-from backend.app.models.feedback import Feedback
-from backend.app.models.templates import Template
-from backend.app.services.metrics import (
+from app.db.sqlite import async_session
+from app.models.executions import Execution
+from app.models.feedback import Feedback
+from app.models.templates import Template
+from app.services.metrics import (
     compute_cost_score,
     compute_quality_score,
     compute_speed_score,
 )
-from backend.app.services.preferences import upsert_model_preference
+from app.services.preferences import upsert_model_preference
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +49,12 @@ class TelemetryRequest(BaseModel):
     )
     addon_mode: Optional[str] = Field(
         None, description="AddOn mode: speed | quality | cost | balanced"
+    )
+    addon_order: Optional[str] = Field(
+        None, description="Comma-separated list of add-ons applied in order"
+    )
+    source: Optional[str] = Field(
+        None, description="Source of the telemetry (e.g., claude-code or free-claude-code)"
     )
     model_id: Optional[str] = Field(
         None, description="Model identifier (e.g., claude-opus-4-7, claude-sonnet-4-6)"
@@ -87,6 +93,8 @@ class TelemetryResponse(BaseModel):
     tradeoff_cost: float
     tradeoff_quality: float
     addon_mode: Optional[str]
+    addon_order: Optional[str]
+    source: Optional[str]
     model_id: Optional[str]
     executed_at: str
 
@@ -100,6 +108,9 @@ class FeedbackRequest(BaseModel):
     quality_score: int = Field(
         ..., ge=1, le=5, description="Quality rating 1-5"
     )
+    judged_by: str = Field(
+        default="user", description="Who judged the quality: 'user' or 'model'"
+    )
     notes: Optional[str] = Field(None, description="Optional free-text notes")
 
 
@@ -109,6 +120,7 @@ class FeedbackResponse(BaseModel):
     id: int
     execution_id: int
     quality_score: int
+    judged_by: str
     notes: Optional[str]
     created_at: str
 
@@ -171,6 +183,8 @@ async def create_telemetry(body: TelemetryRequest) -> TelemetryResponse:
             tradeoff_cost=cost,
             tradeoff_quality=quality,
             addon_mode=body.addon_mode,
+            addon_order=body.addon_order,
+            source=body.source,
             model_id=body.model_id,
         )
         session.add(execution)
@@ -207,6 +221,8 @@ async def create_telemetry(body: TelemetryRequest) -> TelemetryResponse:
             tradeoff_cost=execution.tradeoff_cost,
             tradeoff_quality=execution.tradeoff_quality,
             addon_mode=execution.addon_mode,
+            addon_order=execution.addon_order,
+            source=execution.source,
             model_id=execution.model_id,
             executed_at=str(execution.executed_at),
         )
@@ -246,6 +262,7 @@ async def create_feedback(body: FeedbackRequest) -> FeedbackResponse:
         feedback = Feedback(
             execution_id=body.execution_id,
             quality_score=body.quality_score,
+            judged_by=body.judged_by,
             notes=body.notes,
         )
         session.add(feedback)
@@ -262,6 +279,7 @@ async def create_feedback(body: FeedbackRequest) -> FeedbackResponse:
             id=feedback.id,
             execution_id=feedback.execution_id,
             quality_score=feedback.quality_score,
+            judged_by=feedback.judged_by,
             notes=feedback.notes,
             created_at=str(feedback.created_at),
         )
@@ -272,8 +290,8 @@ async def get_telemetry_summary():
     """Get aggregated telemetry: execution counts by category and avg quality."""
     from sqlalchemy import func, select
 
-    from backend.app.models.executions import Execution
-    from backend.app.models.feedback import Feedback
+    from app.models.executions import Execution
+    from app.models.feedback import Feedback
 
     async with async_session() as session:
         # Total executions by addon_mode

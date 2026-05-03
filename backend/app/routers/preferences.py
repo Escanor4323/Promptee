@@ -10,9 +10,9 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select
 
-from backend.app.db.sqlite import async_session
-from backend.app.models.preferences import ModelPreference
-from backend.app.models.templates import Template
+from app.db.sqlite import async_session
+from app.models.preferences import ModelPreference
+from app.models.templates import Template
 
 logger = logging.getLogger(__name__)
 

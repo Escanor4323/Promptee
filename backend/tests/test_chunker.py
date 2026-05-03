@@ -2,7 +2,7 @@
 
 import pytest
 
-from backend.app.services.chunker import Chunk, chunk_markdown
+from app.services.chunker import Chunk, chunk_markdown
 
 
 SAMPLE_MD = """\

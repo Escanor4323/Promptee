@@ -32,8 +32,8 @@ const (
 	modeQuery inputMode = iota
 	modeSelectConfirm
 	modeAddonSelect
+	modeAddonDescribe
 	modeVarFill
-	modeAddOnSelect
 )
 
 // Model holds all application state for the tooey-based TUI.
@@ -65,9 +65,21 @@ type Model struct {
 	lastTemplateID           int
 	lastExecutionID          int
 	lastAddonMode            string
+	lastAddonName            string
 	currentModel             string
 	availableModels          []string
 	thinking                 bool
+	lastSummary              *api.TelemetrySummaryResponse
+	selectAnimFrame          int
+	selectAnimDone           bool
+	queryAnimFrame           int
+	addonSelectAnimFrame     int
+	addonDescribeAnimFrame   int
+	varFillAnimFrame         int
+	animDone                 bool
+	justFoundResults         bool
+	lastFeedbackScore        int
+	awaitingFeedback         bool
 }
 
 // NewModel creates the initial application model.
@@ -156,6 +168,12 @@ func (m *Model) update(msg app.Msg) app.UpdateResult {
 	case ingestResultMsg:
 		return m.handleIngestResult(msg)
 
+	case addonRegisterResultMsg:
+		return m.handleAddonRegisterResult(msg)
+
+	case addonRecommendResultMsg:
+		return m.handleAddonRecommendResult(msg)
+
 	case healthResultMsg:
 		m.backendOnline = msg.err == nil
 		if m.needsDashboardLoad {
@@ -212,11 +230,14 @@ func (m *Model) update(msg app.Msg) app.UpdateResult {
 		if msg.err != nil {
 			m.convo.Add(ErrorSegment{Message: msg.err.Error()})
 		} else {
+			m.lastFeedbackScore = msg.score
+			m.awaitingFeedback = false
 			m.convo.Add(TextSegment{Text: "[ok] Feedback recorded"})
 		}
 		return app.NoCmd(m)
 
 	case telemetrySummaryResultMsg:
+		m.lastSummary = msg.resp
 		m.convo.RemoveFirst()
 		if msg.resp != nil {
 			m.convo.Add(DashboardSegment{
@@ -267,6 +288,71 @@ func (m *Model) update(msg app.Msg) app.UpdateResult {
 			}
 		}
 		return app.WithCmd(m, newTickCmd)
+
+	case animTickMsg:
+		const maxFrames = 50
+		shouldContinue := false
+
+		switch m.mode {
+		case modeSelectConfirm:
+			if !m.selectAnimDone {
+				m.selectAnimFrame++
+				if m.selectAnimFrame >= maxFrames {
+					m.selectAnimDone = true
+				} else {
+					shouldContinue = true
+				}
+			}
+		case modeQuery:
+			if !m.animDone && m.chatInput.Value == "" {
+				m.queryAnimFrame++
+				if m.queryAnimFrame < maxFrames {
+					shouldContinue = true
+				} else {
+					m.animDone = true
+					m.queryAnimFrame = 0
+					shouldContinue = true
+				}
+			}
+		case modeAddonSelect:
+			if !m.animDone {
+				m.addonSelectAnimFrame++
+				if m.addonSelectAnimFrame < maxFrames {
+					shouldContinue = true
+				} else {
+					m.animDone = true
+					m.addonSelectAnimFrame = 0
+					shouldContinue = true
+				}
+			}
+		case modeAddonDescribe:
+			if !m.animDone {
+				m.addonDescribeAnimFrame++
+				if m.addonDescribeAnimFrame < maxFrames {
+					shouldContinue = true
+				} else {
+					m.animDone = true
+					m.addonDescribeAnimFrame = 0
+					shouldContinue = true
+				}
+			}
+		case modeVarFill:
+			if !m.animDone {
+				m.varFillAnimFrame++
+				if m.varFillAnimFrame < maxFrames {
+					shouldContinue = true
+				} else {
+					m.animDone = true
+					m.varFillAnimFrame = 0
+					shouldContinue = true
+				}
+			}
+		}
+
+		if shouldContinue {
+			return app.WithCmd(m, func() app.Msg { return newAnimTickCmd() })
+		}
+		return app.NoCmd(m)
 	}
 
 	return app.NoCmd(m)
@@ -280,7 +366,7 @@ func (m *Model) handleKey(key app.KeyMsg) app.UpdateResult {
 
 	case input.CtrlShiftC:
 		if m.lastSeg != nil && m.selectedItem.FullText != "" {
-			filled := formatFinalPrompt(m.selectedItem, m.varValues)
+			filled := formatFinalPrompt(m.selectedItem, m.varValues, true, m.lastAddonMode, m.lastAddonName)
 			if err := copyToClipboard(filled); err != nil {
 				m.convo.Add(ErrorSegment{Message: fmt.Sprintf("Failed to copy: %v", err)})
 			} else {
@@ -302,7 +388,7 @@ func (m *Model) handleKey(key app.KeyMsg) app.UpdateResult {
 
 	case input.CmdC: // macOS Command+C
 		if m.lastSeg != nil && m.selectedItem.FullText != "" {
-			filled := formatFinalPrompt(m.selectedItem, m.varValues)
+			filled := formatFinalPrompt(m.selectedItem, m.varValues, true, m.lastAddonMode, m.lastAddonName)
 			if err := copyToClipboard(filled); err != nil {
 				m.convo.Add(ErrorSegment{Message: fmt.Sprintf("Failed to copy: %v", err)})
 			} else {
@@ -323,10 +409,18 @@ func (m *Model) handleKey(key app.KeyMsg) app.UpdateResult {
 		return app.NoCmd(m)
 
 	case input.RuneKey:
-		if num, ok := numKeyTypes[key.Key.Rune]; ok && m.mode == modeQuery && m.lastSeg != nil {
-			item, found := selectRecommendation(*m.lastSeg, num)
-			if found {
-				m.enterVarFill(item)
+		if num, ok := numKeyTypes[key.Key.Rune]; ok && m.mode == modeQuery {
+			if m.awaitingFeedback && num >= 1 && num <= 5 {
+				return app.WithCmd(m, func() app.Msg {
+					return doSubmitFeedback(m.client, m.lastExecutionID, num, "")
+				})
+			}
+			if m.lastSeg != nil {
+				item, found := selectRecommendation(*m.lastSeg, num)
+				if found {
+					m.enterVarFill(item)
+					return app.WithCmd(m, func() app.Msg { return newAnimTickCmd() })
+				}
 			}
 			return app.NoCmd(m)
 		}
@@ -348,7 +442,17 @@ func (m *Model) handleKey(key app.KeyMsg) app.UpdateResult {
 		text, newInput := m.chatInput.Submit()
 		m.chatInput = newInput
 		text = strings.TrimSpace(text)
-		if text == "" {
+		// modeSelectConfirm: empty Enter proceeds to next step
+		if m.mode == modeSelectConfirm {
+			m.proceedWithSelection()
+			return app.NoCmd(m)
+		}
+		// modeAddonDescribe: Enter (including empty) triggers addon description flow
+		if m.mode == modeAddonDescribe {
+			return m.handleAddonDescribe(text)
+		}
+		// modeAddonSelect: empty Enter skips the addon
+		if text == "" && m.mode != modeAddonSelect {
 			return app.NoCmd(m)
 		}
 		return m.handleSubmit(text)
@@ -403,7 +507,7 @@ func (m *Model) handleSubmit(text string) app.UpdateResult {
 			if m.lastTemplateID == 0 {
 				m.convo.Add(ErrorSegment{Message: "No prompt selected. Select one first (press 1-9)."})
 			} else {
-				filled := formatFinalPrompt(m.selectedItem, m.varValues)
+				filled := formatFinalPrompt(m.selectedItem, m.varValues, true, m.lastAddonMode, m.lastAddonName)
 				if err := copyToClipboard(filled); err != nil {
 					m.convo.Add(ErrorSegment{Message: fmt.Sprintf("Failed to copy: %v", err)})
 				} else {
@@ -453,8 +557,10 @@ func (m *Model) handleSubmit(text string) app.UpdateResult {
 			if strings.HasPrefix(text, "/") {
 				parts := strings.Fields(text)
 				switch parts[0] {
-				case "/ingest":
+				case "/add":
 					m.spinner.SetStatus(StatusIngesting, text)
+				case "/add-addon":
+					m.spinner.SetStatus(StatusToolCall, "add-on")
 				case "/health":
 					m.spinner.SetStatus(StatusToolCall, "health")
 				case "/feedback":
@@ -466,6 +572,9 @@ func (m *Model) handleSubmit(text string) app.UpdateResult {
 
 	case modeSelectConfirm:
 		m.proceedWithSelection()
+
+	case modeAddonDescribe:
+		return m.handleAddonDescribe(text)
 
 	case modeAddonSelect:
 		m.handleAddonSelection(text)
@@ -489,10 +598,15 @@ func (m *Model) handleRecommendResult(msg recommendResultMsg) app.UpdateResult {
 		m.convo.Add(AssistantMsgSegment{Text: "No recommendations found."})
 		return app.NoCmd(m)
 	}
+	m.lastFeedbackScore = 0
+	m.justFoundResults = false
 	items := ResultsToItems(msg.resp.Results)
 	seg := RecommendSegment{Items: items, Query: m.lastQuery}
 	m.lastSeg = &seg
 	m.convo.Add(seg)
+	if len(items) > 0 && items[0].Score > 0.7 {
+		m.justFoundResults = true
+	}
 	m.spinner.SetStatus(StatusComplete, fmt.Sprintf("%d results", len(items)))
 
 	if len(items) > 0 {
@@ -520,6 +634,76 @@ func (m *Model) handleIngestResult(msg ingestResultMsg) app.UpdateResult {
 	return app.NoCmd(m)
 }
 
+func (m *Model) handleAddonRegisterResult(msg addonRegisterResultMsg) app.UpdateResult {
+	m.thinking = false
+	if msg.err != nil {
+		m.spinner.SetStatus(StatusError, msg.err.Error())
+		m.convo.Add(ErrorSegment{Message: msg.err.Error()})
+		return app.NoCmd(m)
+	}
+	m.spinner.SetStatus(StatusComplete, "Add-on registered")
+	m.convo.Add(TextSegment{Text: fmt.Sprintf("[ok] Add-on registered: [%s] %s", msg.addon.Mode, msg.addon.Name)})
+	return app.NoCmd(m)
+}
+
+func (m *Model) handleAddonDescribe(text string) app.UpdateResult {
+	if text == "" {
+		m.convo.Add(TextSegment{Text: "Skipping add-on. Using base prompt."})
+		m.lastAddonMode = ""
+		m.lastAddonName = ""
+		m.proceedToVariableFill()
+		return app.NoCmd(m)
+	}
+	m.convo.Add(UserMsgSegment{Text: text})
+	m.thinking = true
+	m.spinner.SetStatus(StatusThinking, "Searching add-ons...")
+	return app.WithCmd(m, func() app.Msg {
+		return doRecommendAddons(m.client, text)
+	})
+}
+
+func (m *Model) handleAddonRecommendResult(msg addonRecommendResultMsg) app.UpdateResult {
+	m.thinking = false
+	if msg.err != nil {
+		m.spinner.SetStatus(StatusError, msg.err.Error())
+		m.convo.Add(ErrorSegment{Message: "Add-on search failed: " + msg.err.Error()})
+		m.proceedToVariableFill()
+		return app.NoCmd(m)
+	}
+	if len(msg.results) == 0 {
+		m.convo.Add(TextSegment{Text: "No matching add-ons found. Using base prompt."})
+		m.lastAddonMode = ""
+		m.lastAddonName = ""
+		m.proceedToVariableFill()
+		return app.NoCmd(m)
+	}
+
+	m.availableAddons = make([]api.AddOn, len(msg.results))
+	for i, r := range msg.results {
+		m.availableAddons[i] = api.AddOn{
+			Name: r.Name, Mode: r.Mode, Suffix: r.Suffix, Description: r.Description,
+		}
+	}
+
+	m.mode = modeAddonSelect
+	m.addonSelectAnimFrame = 0
+	m.animDone = false
+	m.convo.Add(TextSegment{Text: fmt.Sprintf("Found %d matching add-ons — select one or ENTER to skip:", len(msg.results))})
+	for i, addon := range m.availableAddons {
+		m.convo.Add(AddOnPreviewSegment{
+			PromptTitle: m.selectedItem.Title,
+			PromptText:  m.selectedItem.FullText,
+			AddonName:   addon.Name,
+			AddonMode:   addon.Mode,
+			AddonSuffix: addon.Suffix,
+		})
+		m.convo.Add(TextSegment{Text: fmt.Sprintf("  %d. [%s] %s", i+1, addon.Mode, addon.Description)})
+	}
+	m.chatInput = component.NewTextInput(fmt.Sprintf("Select add-on (1-%d) or ENTER to skip...", len(m.availableAddons)))
+	m.spinner.SetStatus(StatusIdle, "")
+	return app.WithCmd(m, func() app.Msg { return newAnimTickCmd() })
+}
+
 func (m *Model) enterVarFill(item RecommendItem) {
 	m.mode = modeSelectConfirm
 	m.selectedItem = item
@@ -528,6 +712,8 @@ func (m *Model) enterVarFill(item RecommendItem) {
 	m.varValues = make(map[string]string)
 	m.availableAddons = item.ApplicableAddons
 	m.lastTemplateID = item.TemplateID
+	m.selectAnimFrame = 0
+	m.selectAnimDone = false
 
 	m.convo.Add(SelectionSegment{
 		Title:     item.Title,
@@ -540,21 +726,19 @@ func (m *Model) enterVarFill(item RecommendItem) {
 }
 
 func (m *Model) proceedWithSelection() {
-	if len(m.availableAddons) > 0 {
-		m.mode = modeAddonSelect
-		m.convo.Add(TextSegment{Text: "Available Add-Ons (optional enhancements for SPEED/COST/QUALITY):"})
-		for i, addon := range m.availableAddons {
-			m.convo.Add(TextSegment{Text: fmt.Sprintf("  %d. [%s] %s", i+1, addon.Mode, addon.Description)})
-		}
-		m.chatInput = component.NewTextInput("Select addon (1-" + fmt.Sprintf("%d", len(m.availableAddons)) + ") or press ENTER to skip...")
-		m.spinner.SetStatus(StatusIdle, "")
-	} else {
-		m.proceedToVariableFill()
-	}
+	m.mode = modeAddonDescribe
+	m.addonDescribeAnimFrame = 0
+	m.animDone = false
+	m.convo.Add(TextSegment{Text: "Describe the add-on you're looking for (or press ENTER to skip):"})
+	m.convo.Add(TextSegment{Text: "  e.g. \"I want speed and less verbosity avoiding token waste\""})
+	m.chatInput = component.NewTextInput("Describe desired add-on or press ENTER to skip...")
+	m.spinner.SetStatus(StatusIdle, "")
 }
 
 func (m *Model) proceedToVariableFill() {
 	m.mode = modeVarFill
+	m.varFillAnimFrame = 0
+	m.animDone = false
 	if len(m.varsToFill) > 0 {
 		m.chatInput = component.NewTextInput("Enter value for [" + m.varsToFill[0] + "]")
 	} else {
@@ -567,6 +751,7 @@ func (m *Model) handleAddonSelection(text string) {
 	if text == "" {
 		m.convo.Add(TextSegment{Text: "No add-on selected. Proceeding with base prompt."})
 		m.lastAddonMode = ""
+		m.lastAddonName = ""
 		m.proceedToVariableFill()
 		return
 	}
@@ -579,6 +764,7 @@ func (m *Model) handleAddonSelection(text string) {
 
 	selected := m.availableAddons[idx-1]
 	m.lastAddonMode = selected.Mode
+	m.lastAddonName = selected.Name
 	m.convo.Add(TextSegment{Text: fmt.Sprintf("[ok] Selected add-on: [%s] %s", selected.Mode, selected.Description)})
 	m.proceedToVariableFill()
 }
@@ -601,7 +787,7 @@ func (m *Model) handleVarFillInput(value string) {
 }
 
 func (m *Model) showFinalPrompt() {
-	final := formatFinalPrompt(m.selectedItem, m.varValues)
+	final := formatFinalPrompt(m.selectedItem, m.varValues, false, m.lastAddonMode, m.lastAddonName)
 	m.convo.Add(AssistantMsgSegment{Text: "**Final Prompt:**\n\n" + final})
 
 	if len(m.availableAddons) > 0 {
@@ -612,7 +798,24 @@ func (m *Model) showFinalPrompt() {
 	}
 
 	m.spinner.SetStatus(StatusComplete, "Ready")
+	if m.lastSummary != nil {
+		addonLabel := "none"
+		if m.lastAddonMode != "" {
+			addonLabel = "[" + m.lastAddonMode + "]"
+		}
+		m.convo.Add(SelectionAnalyticsSegment{
+			TotalExecutions: m.lastSummary.TotalExecutions,
+			AvgQualityScore: m.lastSummary.AvgQualityScore,
+			ByCategory:      m.lastSummary.ByCategory,
+			Percentages:     m.lastSummary.Percentages,
+			ByModel:         m.lastSummary.ByModel,
+			ModelQuality:    m.lastSummary.ModelQuality,
+			AppliedAddon:    addonLabel,
+			TemplateTitle:   m.selectedItem.Title,
+		})
+	}
 	m.mode = modeQuery
+	m.awaitingFeedback = true
 	m.chatInput = component.NewTextInput("Type a query or /help for commands...   (press 1-5 to rate)")
 	if m.timer != nil {
 		m.lastLatencyMs = m.timer.ElapsedMs()
@@ -642,6 +845,41 @@ func truncateStr(s string, max int) string {
 		return s
 	}
 	return s[:max-3] + "..."
+}
+
+// petFace returns the ASCII face and foreground color representing current app state.
+func (m *Model) petFace() (face string, color node.Color) {
+	if !m.backendOnline {
+		return "X _ X", colorRed
+	}
+	if m.spinner.Kind == StatusError {
+		return "X _ X", colorRed
+	}
+	if m.thinking {
+		return "> _ <", colMagenta
+	}
+	if m.lastFeedbackScore == 5 {
+		return "^ _ ^", colorGreen
+	}
+	if m.lastFeedbackScore == 1 {
+		return "T _ T", colCyan
+	}
+	if m.lastAddonMode == "speed" {
+		return "* _ *", colCyan
+	}
+	if m.lastAddonMode == "quality" {
+		return "• _ •", colorBlue
+	}
+	if m.justFoundResults {
+		return "O _ O", colorGreen
+	}
+	if m.lastSummary != nil && m.lastSummary.AvgQualityScore > 0 && m.lastSummary.AvgQualityScore < 2.0 {
+		return "¬ _ ¬", colYellow
+	}
+	if !m.dashboardDisplayed {
+		return "- _ -", colDimGray
+	}
+	return "o _ o", colWhite
 }
 
 var _ = strings.Builder{}

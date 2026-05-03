@@ -7,7 +7,7 @@ that can be used for prompt execution and tracked for preference analysis.
 from sqlalchemy import Column, DateTime, Integer, String, func
 from sqlalchemy.orm import relationship
 
-from backend.app.db.sqlite import Base
+from app.db.sqlite import Base
 
 
 class Model(Base):

@@ -7,7 +7,7 @@ Aggregates execution counts and quality scores by model.
 from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint, func
 from sqlalchemy.orm import relationship
 
-from backend.app.db.sqlite import Base
+from app.db.sqlite import Base
 
 
 class ModelPreference(Base):

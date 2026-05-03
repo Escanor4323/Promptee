@@ -1,6 +1,6 @@
 """Tests for PromptAddOn injection module."""
 
-from backend.app.services.addon import (
+from app.services.addon import (
     BUILTIN_ADDONS,
     PromptAddOn,
     get_addons_for_preference,

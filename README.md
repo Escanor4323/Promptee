@@ -2,20 +2,6 @@
   <img src="docs/assets/promptee_pet_logo.png" alt="Promptee Logo" width="600" />
 </p>
 
-```text
- /$$$$$$$                                               /$$                        
-| $$__  $$                                             | $$                        
-| $$  \ $$ /$$$$$$   /$$$$$$  /$$$$$$/$$$$   /$$$$$$  /$$$$$$    /$$$$$$   /$$$$$$ 
-| $$$$$$$//$$__  $$ /$$__  $$| $$_  $$_  $$ /$$__  $$|_  $$_/   /$$__  $$ /$$__  $$
-| $$____/| $$  \__/| $$  \ $$| $$ \ $$ \ $$| $$  \ $$  | $$    | $$$$$$$$| $$$$$$$$
-| $$     | $$      | $$  | $$| $$ | $$ | $$| $$  | $$  | $$ /$$| $$_____/| $$_____/
-| $$     | $$      |  $$$$$$/| $$ | $$ | $$| $$$$$$$/  |  $$$$/|  $$$$$$$|  $$$$$$$
-|__/     |__/       \______/ |__/ |__/ |__/| $$____/    \___/   \_______/ \_______/
-                                           | $$                                    
-                                           | $$                                    
-                                           |__/                                    
-```
-
 > A production-ready Local MLOps & RAG CLI built for terminal-based AI workflows.
 
 **Promptee** is an open-source toolchain that bridges the gap between ad-hoc prompt engineering and production AI infrastructure. It provides a blistering fast Go-based Terminal User Interface (TUI) alongside a robust Python FastAPI backend, utilizing PostgreSQL and Milvus for intelligent hybrid vector reranking and telemetry tracking.

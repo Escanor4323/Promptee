@@ -19,7 +19,7 @@ def get_model():
     global _model
     if _model is None:
         from sentence_transformers import SentenceTransformer
-        from backend.app.config import get_settings
+        from app.config import get_settings
         settings = get_settings()
         logger.info("Loading embedding model: %s", settings.embedding_model_name)
         _model = SentenceTransformer(settings.embedding_model_name)

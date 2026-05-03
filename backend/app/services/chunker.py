@@ -72,3 +72,43 @@ def chunk_file(file_path: str) -> list[Chunk]:
     """Read a markdown file and return its chunks."""
     with open(file_path, encoding="utf-8") as f:
         return chunk_markdown(f.read())
+
+
+def chunk_file_auto(file_path: str) -> list[Chunk]:
+    """Chunk a file using the appropriate strategy based on file extension.
+
+    Routes by extension:
+    - .md, .markdown → schema-aware markdown chunker (existing behavior)
+    - .pdf → PDF extraction + semantic chunking
+    - .txt and others → semantic chunking
+
+    Args:
+        file_path: Path to the file.
+
+    Returns:
+        List of Chunk objects.
+
+    Raises:
+        FileNotFoundError: If the file does not exist.
+    """
+    import pathlib
+
+    path = pathlib.Path(file_path)
+    suffix = path.suffix.lower()
+
+    if suffix in (".md", ".markdown"):
+        return chunk_file(file_path)
+
+    if suffix == ".pdf":
+        from app.services import pdf_parser
+        from app.services import semantic_chunker
+
+        text = pdf_parser.extract_text(file_path)
+        return semantic_chunker.chunk_semantic(text)
+
+    # Default: treat as plain text and apply semantic chunking
+    from app.services import semantic_chunker
+
+    with open(file_path, encoding="utf-8") as f:
+        text = f.read()
+    return semantic_chunker.chunk_semantic(text)

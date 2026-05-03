@@ -6,9 +6,9 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.models.executions import Execution
-from backend.app.models.feedback import Feedback
-from backend.app.models.templates import Template
+from app.models.executions import Execution
+from app.models.feedback import Feedback
+from app.models.templates import Template
 
 
 @pytest_asyncio.fixture
@@ -85,7 +85,7 @@ async def test_feedback_validation(async_client: AsyncClient, seed_template: Tem
 
 @pytest.mark.asyncio
 async def test_metrics_computation() -> None:
-    from backend.app.services.metrics import compute_speed_score, compute_cost_score
+    from app.services.metrics import compute_speed_score, compute_cost_score
     speed = compute_speed_score(latency_ms=1000.0, input_tokens=500, output_tokens=500)
     assert 0.0 < speed <= 1.0
     cost = compute_cost_score(input_tokens=500, output_tokens=500)

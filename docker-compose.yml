@@ -97,6 +97,8 @@ services:
       - PG_DATABASE=${PG_DATABASE:-promptee}
       - MILVUS_HOST=milvus
       - MILVUS_PORT=19530
+    volumes:
+      - ./:/app/data
     depends_on:
       postgres:
         condition: service_healthy

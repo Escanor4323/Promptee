@@ -12,13 +12,13 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
-from backend.app.db.sqlite import Base
-from backend.app.main import create_app
-from backend.app.models.executions import Execution
-from backend.app.models.feedback import Feedback
-from backend.app.models.templates import Template
+from app.db.sqlite import Base
+from app.main import create_app
+from app.models.executions import Execution
+from app.models.feedback import Feedback
+from app.models.templates import Template
 
-import backend.app.db.sqlite as sqlite_module
+import app.db.sqlite as sqlite_module
 
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 test_engine = create_async_engine(TEST_DATABASE_URL, echo=False)
@@ -201,7 +201,7 @@ async def test_reranking_with_feedback_history(
     seeded_templates: list[dict],
 ) -> None:
     """Reranker boosts templates with high feedback scores."""
-    from backend.app.services.reranker import rerank
+    from app.services.reranker import rerank
 
     async with sqlite_module.async_session() as session:
         t1_id = seeded_templates[0]["template_id"]
@@ -245,7 +245,7 @@ async def test_reranking_with_feedback_history(
 
 @pytest.mark.asyncio
 async def test_addon_injection() -> None:
-    from backend.app.services.addon import inject_addon, BUILTIN_ADDONS
+    from app.services.addon import inject_addon, BUILTIN_ADDONS
 
     base = "You are a code reviewer."
     injected = inject_addon(base, BUILTIN_ADDONS["speed"])
@@ -258,7 +258,7 @@ async def test_addon_injection() -> None:
 
 @pytest.mark.asyncio
 async def test_chunker_produces_valid_chunks() -> None:
-    from backend.app.services.chunker import chunk_file
+    from app.services.chunker import chunk_file
 
     chunks = chunk_file("prompts/software-engineering.md")
     assert len(chunks) == 5

@@ -3,23 +3,26 @@
 Embeds the query, searches Milvus for top-N semantic results, then
 reranks them using historical telemetry data from SQLite and applies
 PromptAddOn injection based on the user's tradeoff preference.
+Full text is fetched from SQLite (moved from Milvus for deduplication).
 """
 
 import logging
 
 from fastapi import APIRouter, HTTPException
+from sqlalchemy import select
 
-from backend.app.db.milvus import search as milvus_search
-from backend.app.db.sqlite import async_session
-from backend.app.schemas import (
+from app.db.milvus import search as milvus_search
+from app.db.sqlite import async_session
+from app.models.templates import Template
+from app.schemas import (
     AddOnSchema,
     RecommendItem,
     RecommendRequest,
     RecommendResponse,
 )
-from backend.app.services.addon import get_addons_for_preference
-from backend.app.services.embedder import embed
-from backend.app.services.reranker import rerank
+from app.services.addon import get_addons_for_preference
+from app.services.embedder import embed
+from app.services.reranker import rerank
 
 logger = logging.getLogger(__name__)
 
@@ -72,17 +75,25 @@ async def recommend_prompts(request: RecommendRequest) -> RecommendResponse:
     ]
 
     items: list[RecommendItem] = []
-    for r in reranked:
-        items.append(RecommendItem(
-            id=r["id"],
-            template_id=r.get("template_id", 0),
-            title=r["title"],
-            objective=r.get("objective", ""),
-            full_text=r["full_text"],
-            variables=r.get("variables", []),
-            hybrid_score=r.get("hybrid_score", 0.0),
-            applicable_addons=addon_schemas,
-        ))
+    async with async_session() as session:
+        for r in reranked:
+            template_id = r.get("template_id", 0)
+            full_text = ""
+            if template_id:
+                result = await session.execute(
+                    select(Template.full_text).where(Template.id == template_id)
+                )
+                full_text = result.scalar_one_or_none() or ""
+            items.append(RecommendItem(
+                id=r["id"],
+                template_id=template_id,
+                title=r["title"],
+                objective=r.get("objective", ""),
+                full_text=full_text,
+                variables=r.get("variables", []),
+                hybrid_score=r.get("hybrid_score", 0.0),
+                applicable_addons=addon_schemas,
+            ))
 
     logger.info(
         "Returning %d recommendations for query: %s (preference=%s)",

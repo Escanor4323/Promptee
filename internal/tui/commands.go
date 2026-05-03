@@ -44,11 +44,22 @@ type telemetryResultMsg struct {
 }
 
 type feedbackResultMsg struct {
-	err error
+	err   error
+	score int
 }
 
 type simulateResponseMsg struct {
 	query string
+}
+
+type addonRegisterResultMsg struct {
+	addon *api.RegisterAddonResponse
+	err   error
+}
+
+type addonRecommendResultMsg struct {
+	results []api.AddonRecommendResult
+	err     error
 }
 
 type telemetrySummaryResultMsg struct {
@@ -72,6 +83,13 @@ type tickMsg time.Time
 func newTickCmd() app.Msg {
 	time.Sleep(time.Second)
 	return tickMsg(time.Now())
+}
+
+type animTickMsg struct{}
+
+func newAnimTickCmd() app.Msg {
+	time.Sleep(80 * time.Millisecond)
+	return animTickMsg{}
 }
 
 func doRecommend(client *api.Client, query string, topK int, tradeoffPreference string) app.Msg {
@@ -135,7 +153,33 @@ func doSubmitFeedback(client *api.Client, executionID int, qualityScore int, not
 		QualityScore: qualityScore,
 		Notes:        notes,
 	})
-	return feedbackResultMsg{err: err}
+	return feedbackResultMsg{err: err, score: qualityScore}
+}
+
+func doRegisterAddon(client *api.Client, mode, name, filePath string) app.Msg {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return addonRegisterResultMsg{err: fmt.Errorf("read file %s: %w", filePath, err)}
+	}
+	resp, err := client.RegisterAddon(ctx, api.RegisterAddonRequest{
+		Name:        name,
+		Mode:        mode,
+		Suffix:      string(content),
+		Description: fmt.Sprintf("Custom add-on: %s", name),
+	})
+	return addonRegisterResultMsg{addon: resp, err: err}
+}
+
+func doRecommendAddons(client *api.Client, query string) app.Msg {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	resp, err := client.RecommendAddons(ctx, api.AddonRecommendRequest{Query: query, TopK: 5})
+	if err != nil {
+		return addonRecommendResultMsg{err: err}
+	}
+	return addonRecommendResultMsg{results: resp.Results}
 }
 
 func doSimulateResponse(query string) app.Msg {
@@ -190,22 +234,33 @@ func dispatchCommand(input string, client *api.Client, topK int, tradeoffPrefere
 	}
 
 	switch cmd {
-	case "/ingest":
+	case "/add":
 		if arg == "" {
-			return dispatchResult{msg: "Usage: /ingest <path>"}
-		}
-		return dispatchResult{
-			cmd: func() app.Msg { return doIngest(client, arg) },
-			msg: "Ingesting: " + arg,
-		}
-	case "/ingest-batch":
-		if arg == "" {
-			return dispatchResult{msg: "Usage: /ingest-batch <path1> <path2> ..."}
+			return dispatchResult{msg: "Usage: /add <path> [path2 ...]"}
 		}
 		paths := strings.Fields(arg)
+		if len(paths) == 1 {
+			return dispatchResult{
+				cmd: func() app.Msg { return doIngest(client, paths[0]) },
+				msg: "Adding: " + paths[0],
+			}
+		}
 		return dispatchResult{
 			cmd: func() app.Msg { return doBatchIngest(client, paths) },
-			msg: fmt.Sprintf("Ingesting batch: %d paths", len(paths)),
+			msg: fmt.Sprintf("Adding batch: %d paths", len(paths)),
+		}
+	case "/add-addon":
+		if arg == "" {
+			return dispatchResult{msg: "Usage: /add-addon <mode> <name> <file-path>\n  mode: speed|quality|cost"}
+		}
+		parts := strings.SplitN(arg, " ", 3)
+		if len(parts) < 3 {
+			return dispatchResult{msg: "Usage: /add-addon <mode> <name> <file-path>"}
+		}
+		addonMode, addonName, filePath := parts[0], parts[1], parts[2]
+		return dispatchResult{
+			cmd: func() app.Msg { return doRegisterAddon(client, addonMode, addonName, filePath) },
+			msg: fmt.Sprintf("Registering add-on [%s] %s...", addonMode, addonName),
 		}
 	case "/health":
 		return dispatchResult{
@@ -263,7 +318,7 @@ func fillVariable(templateText, varName, value string) string {
 	return strings.ReplaceAll(templateText, "["+varName+"]", value)
 }
 
-func formatFinalPrompt(item RecommendItem, values map[string]string) string {
+func formatFinalPrompt(item RecommendItem, values map[string]string, injectTrace bool, addonMode, addonOrder string) string {
 	filled := item.FullText
 	for v, val := range values {
 		filled = fillVariable(filled, v, val)
@@ -271,6 +326,9 @@ func formatFinalPrompt(item RecommendItem, values map[string]string) string {
 	remaining := prompt.ParseVariables(filled)
 	if len(remaining) > 0 {
 		filled += "\n\nUnfilled variables: " + strings.Join(remaining, ", ")
+	}
+	if injectTrace {
+		filled += fmt.Sprintf("\n[PROMPTEE_TRACE:%d:%s:%s]", item.TemplateID, addonMode, addonOrder)
 	}
 	return filled
 }
@@ -286,18 +344,18 @@ func parseNumSelection(input string) (int, bool) {
 func formatHelpText() string {
 	copyKey, pasteKey := getClipboardKeybindings()
 	return fmt.Sprintf(`Available commands:
- /ingest <path>         — Ingest file/directory into vector store
- /ingest-batch <paths>  — Ingest multiple space-separated paths
- /model <name>          — Switch active model for telemetry tracking
- /add-model <name>      — Register new model in backend
- /copy                  — Copy filled prompt to clipboard
- /telemetry             — Show telemetry info
- /feedback <1-5>        — Rate last execution (1-5 stars)
+ /add <path> [path2 ...]  — Add prompt file(s) to vector store
+ /add-addon <mode> <name> <file>  — Register a custom add-on (mode: speed|quality|cost)
+ /model <name>            — Switch active model for telemetry tracking
+ /add-model <name>        — Register new model in backend
+ /copy                    — Copy filled prompt to clipboard
+ /telemetry               — Show telemetry info
+ /feedback <1-5>          — Rate last execution (1-5 stars)
  /daemon start|stop|status — Manage backend daemon
- /health                — Check backend health
- /clear                 — Clear transcript
- /help                  — Show this help
- /quit                  — Exit Promptee
+ /health                  — Check backend health
+ /clear                   — Clear transcript
+ /help                    — Show this help
+ /quit                    — Exit Promptee
 
  Clipboard:
    %s  — Copy selected prompt to system clipboard

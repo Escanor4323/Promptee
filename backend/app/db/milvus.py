@@ -11,7 +11,7 @@ from typing import Optional
 
 from pymilvus import Collection, CollectionSchema, DataType, FieldSchema, MilvusException, connections, utility
 
-from backend.app.config import get_settings
+from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -55,12 +55,11 @@ def get_or_create_collection() -> Collection:
     vector_field = FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=VECTOR_DIM)
     title_field = FieldSchema(name="title", dtype=DataType.VARCHAR, max_length=256)
     objective_field = FieldSchema(name="objective", dtype=DataType.VARCHAR, max_length=1024)
-    full_text_field = FieldSchema(name="full_text", dtype=DataType.VARCHAR, max_length=8192)
     variables_field = FieldSchema(name="variables", dtype=DataType.VARCHAR, max_length=1024)
 
     schema = CollectionSchema(
-        fields=[id_field, template_id_field, vector_field, title_field, objective_field, full_text_field, variables_field],
-        description="Prompt template vectors with metadata",
+        fields=[id_field, template_id_field, vector_field, title_field, objective_field, variables_field],
+        description="Prompt template vectors with metadata (full_text moved to SQLite)",
     )
 
     _collection = Collection(name=COLLECTION_NAME, schema=schema)
@@ -105,7 +104,6 @@ def insert_chunks(chunks: list, embeddings: list, template_ids: list[int]) -> li
             "vector": vector,
             "title": chunk.title,
             "objective": chunk.objective,
-            "full_text": chunk.full_text,
             "variables": json.dumps(chunk.variables),
         })
 
@@ -118,7 +116,8 @@ def insert_chunks(chunks: list, embeddings: list, template_ids: list[int]) -> li
 def search(query_vector, top_k: int = 10) -> list[dict]:
     """Search for similar prompt templates.
 
-    Returns list of dicts with: id, template_id, title, objective, full_text, variables, score.
+    Returns list of dicts with: id, template_id, title, objective, variables, score.
+    Note: full_text is fetched from SQLite during recommendation (see recommend.py).
     """
     collection = get_or_create_collection()
 
@@ -142,7 +141,7 @@ def search(query_vector, top_k: int = 10) -> list[dict]:
         anns_field="vector",
         param=search_params,
         limit=top_k,
-        output_fields=["template_id", "title", "objective", "full_text", "variables"],
+        output_fields=["template_id", "title", "objective", "variables"],
     )
 
     hits: list[dict] = []
@@ -152,7 +151,6 @@ def search(query_vector, top_k: int = 10) -> list[dict]:
             "template_id": hit.entity.get("template_id"),
             "title": hit.entity.get("title"),
             "objective": hit.entity.get("objective"),
-            "full_text": hit.entity.get("full_text"),
             "variables": json.loads(hit.entity.get("variables", "[]")),
             "score": hit.score,
         })

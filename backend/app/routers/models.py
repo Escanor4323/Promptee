@@ -10,8 +10,8 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from backend.app.db.sqlite import async_session
-from backend.app.models.models import Model
+from app.db.sqlite import async_session
+from app.models.models import Model
 
 logger = logging.getLogger(__name__)
 

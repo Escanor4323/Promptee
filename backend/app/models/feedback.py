@@ -11,12 +11,13 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Integer,
+    String,
     Text,
     func,
 )
 from sqlalchemy.orm import relationship
 
-from backend.app.db.sqlite import Base
+from app.db.sqlite import Base
 
 
 class Feedback(Base):
@@ -36,6 +37,7 @@ class Feedback(Base):
     )
     quality_score = Column(Integer, nullable=False)  # 1 to 5
     notes = Column(Text, nullable=True)
+    judged_by = Column(String(32), nullable=False, default="user")  # "user" or "model"
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
 
     execution = relationship("Execution", back_populates="feedback", lazy="selectin")

@@ -14,14 +14,20 @@ func (m *Model) view(focused string) node.Node {
 		w = 80
 	}
 
-	// Top status bar: " Promptee" left, backend/mode info right.
-	left := " Promptee"
+	// Top status bar with pet face in the middle.
+	face, faceColor := m.petFace()
+	petStr := " " + face + " "
 	right := m.statusRight()
-	pad := w - len(left) - len(right)
+	pad := w - len(" Promptee") - len(petStr) - len(right)
 	if pad < 1 {
 		pad = 1
 	}
-	statusBar := node.TextStyled(left+strings.Repeat(" ", pad)+right, colWhite, colDarkGray, node.Bold)
+	statusBar := node.Row(
+		node.TextStyled(" Promptee", colWhite, colDarkGray, node.Bold),
+		node.TextStyled(petStr, faceColor, node.Color(238), node.Bold),
+		node.TextStyled(strings.Repeat(" ", pad), colWhite, colDarkGray, 0),
+		node.TextStyled(right, colWhite, colDarkGray, node.Bold),
+	)
 
 	sep := node.TextStyled(strings.Repeat("─", w), colDimGray, colorDefault, 0)
 
@@ -42,15 +48,18 @@ func (m *Model) view(focused string) node.Node {
 	var inputLine node.Node
 	if highlighted, ok := renderCommandInput(m.chatInput.Value); ok {
 		inputLine = highlighted
+	} else if m.mode == modeSelectConfirm && m.chatInput.Value == "" {
+		inputLine = renderSelectConfirmInput("  ❯ ", m.selectAnimFrame, m.selectAnimDone)
+	} else if m.mode == modeQuery && m.chatInput.Value == "" {
+		inputLine = renderAnimatedInput("  ❯ ", "Type a query...", m.queryAnimFrame, m.animDone)
+	} else if m.mode == modeAddonSelect && m.chatInput.Value == "" {
+		inputLine = renderAnimatedInput("  ❯ ", m.chatInput.Placeholder, m.addonSelectAnimFrame, m.animDone)
+	} else if m.mode == modeAddonDescribe && m.chatInput.Value == "" {
+		inputLine = renderAnimatedInput("  ❯ ", m.chatInput.Placeholder, m.addonDescribeAnimFrame, m.animDone)
+	} else if m.mode == modeVarFill && m.chatInput.Value == "" {
+		inputLine = renderAnimatedInput("  ❯ ", m.chatInput.Placeholder, m.varFillAnimFrame, m.animDone)
 	} else {
 		inputLine = m.chatInput.Render("  ❯ ", colWhite, colorDefault, 0)
-		if m.mode == modeQuery && m.chatInput.Value == "" {
-			inputLine = node.Row(
-				node.TextStyled("  ", colWhite, colorDefault, 0),
-				node.TextStyled("❯", colWhite, colorDefault, node.Bold),
-				node.Text(" "),
-			)
-		}
 	}
 
 	// Bottom border
@@ -60,7 +69,9 @@ func (m *Model) view(focused string) node.Node {
 	helpText := "Ctrl+C:quit │ /help:commands │ 1-9:select │ mouse:scroll"
 	if m.mode == modeVarFill {
 		helpText += " │ [var-fill]"
-	} else if m.mode == modeAddOnSelect {
+	} else if m.mode == modeAddonDescribe {
+		helpText += " │ [addon-describe]"
+	} else if m.mode == modeAddonSelect {
 		helpText += " │ [addon-select]"
 	}
 	helpPad := w - len(helpText)
@@ -89,6 +100,43 @@ func (m *Model) statusRight() string {
 	return fmt.Sprintf("backend:%s │ k:%d │ model:%s ", backend, m.topK, m.currentModel)
 }
 
+// renderSelectConfirmInput renders the "Press ENTER..." placeholder with a
+// right-to-left brightness wave, then settles to default color once done.
+func renderSelectConfirmInput(prefix string, frame int, done bool) node.Node {
+	const placeholder = "Press ENTER to proceed, or ESC to reselect..."
+	prefixNode := node.TextStyled(prefix, colWhite, colorDefault, 0)
+	if done {
+		return node.Row(prefixNode, node.TextStyled(placeholder, colorDefault, colorDefault, 0))
+	}
+	runes := []rune(placeholder)
+	n := len(runes)
+	brightPos := n - 1 - frame
+	children := []node.Node{prefixNode}
+	for i, ch := range runes {
+		d := i - brightPos
+		if d < 0 {
+			d = -d
+		}
+		var col node.Color
+		switch {
+		case d == 0:
+			col = node.Color(255)
+		case d == 1:
+			col = node.Color(253)
+		case d == 2:
+			col = node.Color(249)
+		case d == 3:
+			col = node.Color(245)
+		case d <= 5:
+			col = node.Color(241)
+		default:
+			col = node.Color(238)
+		}
+		children = append(children, node.TextStyled(string(ch), col, colorDefault, 0))
+	}
+	return node.Row(children...)
+}
+
 // renderCommandInput colorizes a /command input line.
 // The command name (after /) is rendered in cyan; arguments in orange.
 // Returns (node, true) when text starts with '/', otherwise (zero, false).
@@ -109,4 +157,39 @@ func renderCommandInput(text string) (node.Node, bool) {
 		)
 	}
 	return node.Row(children...), true
+}
+
+// renderAnimatedInput renders a placeholder with left-to-right brightness wave animation.
+func renderAnimatedInput(prefix, placeholder string, frame int, done bool) node.Node {
+	prefixNode := node.TextStyled(prefix, colWhite, colorDefault, 0)
+	if done {
+		return node.Row(prefixNode, node.TextStyled(placeholder, colGray, colorDefault, 0))
+	}
+	runes := []rune(placeholder)
+	n := len(runes)
+	brightPos := frame % n
+	children := []node.Node{prefixNode}
+	for i, ch := range runes {
+		d := i - brightPos
+		if d < 0 {
+			d = -d
+		}
+		var col node.Color
+		switch {
+		case d == 0:
+			col = node.Color(255)
+		case d == 1:
+			col = node.Color(253)
+		case d == 2:
+			col = node.Color(249)
+		case d == 3:
+			col = node.Color(245)
+		case d <= 5:
+			col = node.Color(241)
+		default:
+			col = node.Color(238)
+		}
+		children = append(children, node.TextStyled(string(ch), col, colorDefault, 0))
+	}
+	return node.Row(children...)
 }

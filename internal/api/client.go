@@ -298,6 +298,51 @@ func (c *Client) ListModels(ctx context.Context) ([]string, error) {
 	return names, nil
 }
 
+// RegisterAddonRequest is the body for POST /api/v1/addons.
+type RegisterAddonRequest struct {
+	Name        string `json:"name"`
+	Mode        string `json:"mode"`
+	Suffix      string `json:"suffix"`
+	Description string `json:"description"`
+}
+
+// RegisterAddonResponse is the response from POST /api/v1/addons.
+type RegisterAddonResponse struct {
+	ID          int    `json:"id"`
+	Name        string `json:"name"`
+	Mode        string `json:"mode"`
+	Suffix      string `json:"suffix"`
+	Description string `json:"description"`
+	Source      string `json:"source"`
+}
+
+// RegisterAddon calls POST /api/v1/addons to create a custom add-on.
+func (c *Client) RegisterAddon(ctx context.Context, req RegisterAddonRequest) (*RegisterAddonResponse, error) {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("marshal register addon request: %w", err)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/api/v1/addons", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("create register addon request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	resp, err := c.HTTPClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("register addon request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("register addon returned status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+	var result RegisterAddonResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode register addon response: %w", err)
+	}
+	return &result, nil
+}
+
 // RegisterModel registers a new model with the backend.
 func (c *Client) RegisterModel(ctx context.Context, req RegisterModelRequest) (*ModelResponse, error) {
 	body, err := json.Marshal(req)
@@ -321,6 +366,53 @@ func (c *Client) RegisterModel(ctx context.Context, req RegisterModelRequest) (*
 	var result ModelResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("decode register model response: %w", err)
+	}
+	return &result, nil
+}
+
+// AddonRecommendRequest is the body for POST /api/v1/addons/recommend.
+type AddonRecommendRequest struct {
+	Query string `json:"query"`
+	TopK  int    `json:"top_k"`
+}
+
+// AddonRecommendResult is a single ranked add-on result.
+type AddonRecommendResult struct {
+	Name        string  `json:"name"`
+	Mode        string  `json:"mode"`
+	Suffix      string  `json:"suffix"`
+	Description string  `json:"description"`
+	Score       float64 `json:"score"`
+}
+
+// AddonRecommendResponse is the response from POST /api/v1/addons/recommend.
+type AddonRecommendResponse struct {
+	Results []AddonRecommendResult `json:"results"`
+}
+
+// RecommendAddons calls POST /api/v1/addons/recommend and returns ranked add-ons.
+func (c *Client) RecommendAddons(ctx context.Context, req AddonRecommendRequest) (*AddonRecommendResponse, error) {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("marshal addon recommend request: %w", err)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/api/v1/addons/recommend", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("create addon recommend request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	resp, err := c.HTTPClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("addon recommend request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("addon recommend returned status %d: %s", resp.StatusCode, string(body))
+	}
+	var result AddonRecommendResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode addon recommend response: %w", err)
 	}
 	return &result, nil
 }

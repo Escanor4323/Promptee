@@ -4,10 +4,10 @@ import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.models.executions import Execution
-from backend.app.models.feedback import Feedback
-from backend.app.models.templates import Template
-from backend.app.services.reranker import QUALITY_DEFAULT, rerank
+from app.models.executions import Execution
+from app.models.feedback import Feedback
+from app.models.templates import Template
+from app.services.reranker import QUALITY_DEFAULT, rerank
 
 
 @pytest_asyncio.fixture

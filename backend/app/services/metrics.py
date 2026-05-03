@@ -16,8 +16,8 @@ from typing import Optional
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.models.executions import Execution
-from backend.app.models.feedback import Feedback
+from app.models.executions import Execution
+from app.models.feedback import Feedback
 
 logger = logging.getLogger(__name__)
 

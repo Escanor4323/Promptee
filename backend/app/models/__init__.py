@@ -10,10 +10,10 @@ Tradeoff Mapping:
     QUALITY = f(avg feedback score) -> tradeoff_quality (0-1)
 """
 
-from backend.app.models.executions import Execution
-from backend.app.models.feedback import Feedback
-from backend.app.models.models import Model
-from backend.app.models.preferences import ModelPreference
-from backend.app.models.templates import Template
+from app.models.executions import Execution
+from app.models.feedback import Feedback
+from app.models.models import Model
+from app.models.preferences import ModelPreference
+from app.models.templates import Template
 
 __all__ = ["Execution", "Feedback", "Model", "ModelPreference", "Template"]

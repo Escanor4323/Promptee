@@ -179,8 +179,27 @@ func getProjectRoot() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to get executable path: %w", err)
 	}
-	// Determine project root (bin/promptee -> ../..)
-	return filepath.Dir(filepath.Dir(exePath)), nil
+
+	exePath, err = filepath.Abs(exePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to get absolute path: %w", err)
+	}
+
+	// If executable is at project_root/bin/promptee, go up 2 levels
+	// If executable is at project_root/promptee, go up 1 level
+	candidates := []string{
+		filepath.Dir(exePath),           // project_root (if at project_root/promptee)
+		filepath.Dir(filepath.Dir(exePath)), // project_root (if at project_root/bin/promptee)
+	}
+
+	// Return the first directory that contains go.mod
+	for _, candidate := range candidates {
+		if _, err := os.Stat(filepath.Join(candidate, "go.mod")); err == nil {
+			return candidate, nil
+		}
+	}
+
+	return "", fmt.Errorf("could not find project root (go.mod not found)")
 }
 
 func runBuildCli(cmd *cobra.Command, args []string) error {

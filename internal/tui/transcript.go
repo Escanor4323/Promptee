@@ -283,6 +283,143 @@ func (s DashboardSegment) NodeRender() node.Node {
 	return node.Column(children...)
 }
 
+// AddOnPreviewSegment shows a side-by-side comparison of a prompt
+// without vs. with a selected add-on applied.
+type AddOnPreviewSegment struct {
+	PromptTitle string
+	PromptText  string
+	AddonName   string
+	AddonMode   string
+	AddonSuffix string
+}
+
+func (s AddOnPreviewSegment) Render() string {
+	prompt := s.PromptText
+	if len(prompt) > 120 {
+		prompt = prompt[:120] + "..."
+	}
+	addon := s.AddonSuffix
+	if len(addon) > 80 {
+		addon = addon[:80] + "..."
+	}
+	return fmt.Sprintf("[%s] %s preview\n◀ Without: %s\n▶ With:    %s%s",
+		s.AddonMode, s.AddonName, prompt, prompt, addon)
+}
+
+func (s AddOnPreviewSegment) NodeRender() node.Node {
+	const maxPrompt = 200
+	const maxAddon = 120
+
+	prompt := s.PromptText
+	if len(prompt) > maxPrompt {
+		prompt = prompt[:maxPrompt] + "..."
+	}
+	addonText := s.AddonSuffix
+	if len(addonText) > maxAddon {
+		addonText = addonText[:maxAddon] + "..."
+	}
+
+	left := node.Column(
+		node.TextStyled("  ◀ Without add-on  ", colorDefault, colDarkGray, node.Bold),
+		node.TextStyled(prompt, colorDefault, colorDefault, 0),
+	).WithFlex(1)
+
+	sep := node.TextStyled(" │ ", colGray, colorDefault, 0)
+
+	right := node.Column(
+		node.TextStyled(fmt.Sprintf("  ▶ With [%s] %s  ", s.AddonMode, s.AddonName), colorDefault, colDimGray, node.Bold),
+		node.TextStyled(prompt+addonText, colorDefault, colorDefault, 0),
+	).WithFlex(1)
+
+	return node.Row(left, sep, right)
+}
+
+// SelectionAnalyticsSegment shows a compact analytics panel after final prompt display.
+type SelectionAnalyticsSegment struct {
+	TotalExecutions int
+	AvgQualityScore float64
+	ByCategory      map[string]int
+	Percentages     map[string]float64
+	ByModel         map[string]int
+	ModelQuality    map[string]float64
+	AppliedAddon    string
+	TemplateTitle   string
+}
+
+const analyticsBarWidth = 20
+
+func pctBar(pct float64) (filled string, empty string) {
+	n := int(pct / 100.0 * analyticsBarWidth)
+	if n > analyticsBarWidth {
+		n = analyticsBarWidth
+	}
+	return strings.Repeat("█", n), strings.Repeat("░", analyticsBarWidth-n)
+}
+
+func (s SelectionAnalyticsSegment) Render() string {
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf(">>> Analytics  executions=%d  avg_quality=%.1f\n", s.TotalExecutions, s.AvgQualityScore))
+	for _, cat := range []string{"speed", "cost", "quality", "balanced"} {
+		pct := s.Percentages[cat]
+		f, e := pctBar(pct)
+		b.WriteString(fmt.Sprintf("  %-8s [%s%s] %5.1f%%\n", cat, f, e, pct))
+	}
+	b.WriteString("  Add-on applied: " + s.AppliedAddon)
+	return b.String()
+}
+
+func (s SelectionAnalyticsSegment) NodeRender() node.Node {
+	if s.ByCategory == nil {
+		s.ByCategory = make(map[string]int)
+	}
+	if s.Percentages == nil {
+		s.Percentages = make(map[string]float64)
+	}
+
+	addonLabel := s.AppliedAddon
+	if addonLabel == "" {
+		addonLabel = "none"
+	}
+
+	header := node.Row(
+		node.TextStyled("  ▸ Analytics", colorBlue, colorDefault, node.Bold),
+		node.TextStyled(fmt.Sprintf("   runs: %d", s.TotalExecutions), colGray, colorDefault, 0),
+		node.TextStyled(fmt.Sprintf("   avg quality: %.1f / 5", s.AvgQualityScore), colGray, colorDefault, 0),
+	)
+
+	type catDef struct {
+		key string
+		col node.Color
+	}
+	cats := []catDef{
+		{"speed", colorCyan},
+		{"cost", colorOrange},
+		{"quality", colorGreen},
+		{"balanced", colWhite},
+	}
+
+	rows := []node.Node{header, node.Text("")}
+	for _, c := range cats {
+		pct := s.Percentages[c.key]
+		f, e := pctBar(pct)
+		label := node.TextStyled(fmt.Sprintf("  %-8s ", c.key), c.col, colorDefault, node.Bold)
+		barFilled := node.TextStyled(f, c.col, colorDefault, 0)
+		barEmpty := node.TextStyled(e, node.Color(238), colorDefault, 0)
+		pctLabel := node.TextStyled(fmt.Sprintf(" %5.1f%%  (%d)", pct, s.ByCategory[c.key]), colGray, colorDefault, 0)
+		rows = append(rows, node.Row(label, barFilled, barEmpty, pctLabel))
+	}
+
+	rows = append(rows,
+		node.Text(""),
+		node.Row(
+			node.TextStyled("  Applied add-on: ", colGray, colorDefault, 0),
+			node.TextStyled(addonLabel, colorOrange, colorDefault, node.Bold),
+		),
+	)
+
+	return node.Column(rows...)
+}
+
 type UserMsgSegment struct {
 	Text string
 }
@@ -299,10 +436,9 @@ func (s UserMsgSegment) NodeRender() node.Node {
 		if i == 0 {
 			prefix = "  ❯ "
 		}
-		children = append(children, node.TextStyled(prefix+line, colDimGray, colorDefault, 0))
-	}
-	if len(children) == 1 {
-		return children[0]
+		text := node.TextStyled(prefix+line, colorDefault, colDimGray, 0)
+		filler := node.TextStyled("", colorDefault, colDimGray, 0).WithFlex(1)
+		children = append(children, node.Row(text, filler))
 	}
 	return node.Column(children...)
 }

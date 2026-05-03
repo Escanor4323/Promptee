@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     sqlite_db_path: str = "./data/promptee.db"
     embedding_model_name: str = "all-MiniLM-L6-v2"
     log_level: str = "INFO"
+    host_project_root: str = "/Users/joelmartinez/Documents/Projects/Promptee"
+    container_data_root: str = "/app/data"
 
 
 def get_settings() -> Settings:

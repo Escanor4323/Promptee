@@ -9,8 +9,8 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
-from backend.app.db.sqlite import Base
-from backend.app.main import create_app
+from app.db.sqlite import Base
+from app.main import create_app
 
 # In-memory SQLite for tests
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
@@ -27,7 +27,7 @@ def event_loop():
 
 @pytest_asyncio.fixture
 async def async_client() -> AsyncGenerator[AsyncClient, None]:
-    import backend.app.db.sqlite as sqlite_module
+    import app.db.sqlite as sqlite_module
 
     original_engine = sqlite_module.engine
     original_session_local = sqlite_module.AsyncSessionLocal

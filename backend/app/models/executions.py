@@ -8,7 +8,7 @@ tradeoff scores (speed, cost, quality).
 from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, func
 from sqlalchemy.orm import relationship
 
-from backend.app.db.sqlite import Base
+from app.db.sqlite import Base
 
 
 class Execution(Base):
@@ -29,6 +29,8 @@ class Execution(Base):
     tradeoff_cost = Column(Float, default=0.0, nullable=False)
     tradeoff_quality = Column(Float, default=0.0, nullable=False)
     addon_mode = Column(String(64), nullable=True)  # "speed"|"quality"|"cost"|"balanced"
+    addon_order = Column(String(255), nullable=True)  # e.g., "speed_addon_1,quality_addon_2"
+    source = Column(String(64), nullable=True)  # e.g., "claude-code" or "free-claude-code"
     model_id = Column(String(128), nullable=True)  # "claude-opus-4-7"|"claude-sonnet-4-6"|etc
     executed_at = Column(DateTime, server_default=func.now(), nullable=False)
 
