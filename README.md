@@ -2,7 +2,19 @@
   <img src="docs/assets/promptee_logo.png" alt="Promptee Logo" width="600" />
 </p>
 
-# Promptee (Codename: Daedalus)
+```text
+ /$$$$$$$                                               /$$                        
+| $$__  $$                                             | $$                        
+| $$  \ $$ /$$$$$$   /$$$$$$  /$$$$$$/$$$$   /$$$$$$  /$$$$$$    /$$$$$$   /$$$$$$ 
+| $$$$$$$//$$__  $$ /$$__  $$| $$_  $$_  $$ /$$__  $$|_  $$_/   /$$__  $$ /$$__  $$
+| $$____/| $$  \__/| $$  \ $$| $$ \ $$ \ $$| $$  \ $$  | $$    | $$$$$$$$| $$$$$$$$
+| $$     | $$      | $$  | $$| $$ | $$ | $$| $$  | $$  | $$ /$$| $$_____/| $$_____/
+| $$     | $$      |  $$$$$$/| $$ | $$ | $$| $$$$$$$/  |  $$$$/|  $$$$$$$|  $$$$$$$
+|__/     |__/       \______/ |__/ |__/ |__/| $$____/    \___/   \_______/ \_______/
+                                           | $$                                    
+                                           | $$                                    
+                                           |__/                                    
+```
 
 > A production-ready Local MLOps & RAG CLI built for terminal-based AI workflows.
 
@@ -113,6 +125,23 @@ Promptee can be run headlessly for seamless integration into scripts, LLM agents
 ## 📊 Telemetry Architecture
 
 Promptee monitors your local LLM usage (like Claude Code) via asynchronous log tailing. It intercepts special `[PROMPTEE_TRACE:...]` tokens that are appended to the clipboard. The LLM ignores these trace tokens, but Promptee uses them to cross-reference actual execution latency, token counts, and session outcomes—feeding this data back into the Hybrid Reranker.
+
+## 🐾 The Promptee Pet
+
+Promptee features a reactive "digital pet" mascot in the TUI that changes its facial expression based on the current system state, telemetry scores, and active Add-Ons. 
+
+| Emoticon | State | Trigger |
+| :---: | :--- | :--- |
+| **`o _ o`** | Attentive / Ready | The CLI is open and waiting for the user to type their natural language intent. |
+| **`- _ -`** | Dormant / Asleep | The system is booting up, or the backend daemon is in zero-drain standby mode. |
+| **`> _ <`** | Straining / Processing | The FastAPI backend is querying the Milvus vector database and calculating hybrid weights. |
+| **`O _ O`** | Bingo / Found | The RAG pipeline just returned an exact, high-confidence template match for the user's intent. |
+| **`^ _ ^`** | Delighted / Success | The user executes a prompt and gives it a 5-star quality rating during the telemetry phase. |
+| **`X _ X`** | Fatal / Error | A system failure occurs (e.g., Milvus container is down, or required `[VARIABLES]` are missing). |
+| **`¬ _ ¬`** | Skeptical / Warning | The user is about to execute a prompt that historically has a very low 1-star quality score, or token limits are dangerously high. |
+| **`* _ *`** | Overclocked / Speed Mode | The user attaches the "Speed AddOn" to strip all markdown and explanations for maximum velocity. |
+| **`• _ •`** | Focused / Quality Mode | The user attaches the "Quality AddOn" (Chain-of-Thought), shifting the AI into strict, step-by-step reasoning. |
+| **`T _ T`** | Sad / Low Rating | The user gives an executed prompt a 1-star rating, mathematically demoting it in the SQLite database. |
 
 ## 🤝 Contributing
 
