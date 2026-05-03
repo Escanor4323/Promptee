@@ -20,6 +20,15 @@ Designed for developers who spend their lives in the terminal, Promptee acts as 
 
 ## 🛠️ Tech Stack
 
+<div align="center">
+  <img src="https://img.shields.io/badge/Go-00ADD8?style=for-the-badge&logo=go&logoColor=white" alt="Go" />
+  <img src="https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python" />
+  <img src="https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI" />
+  <img src="https://img.shields.io/badge/PostgreSQL-316192?style=for-the-badge&logo=postgresql&logoColor=white" alt="PostgreSQL" />
+  <img src="https://img.shields.io/badge/Milvus-0D1229?style=for-the-badge&logo=vectorworks&logoColor=white" alt="Milvus" />
+  <img src="https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker" />
+</div>
+
 ### CLI / Frontend
 - **Go 1.21+**: Core CLI binary for blazing performance.
 - **Cobra**: Command orchestration and routing.
