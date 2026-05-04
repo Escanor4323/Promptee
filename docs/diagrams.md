@@ -531,10 +531,6 @@ graph TB
     ModelsR --> SQLite
     PrefsR --> SQLite
 
-    style API fill:#2563EB,color:#fff,stroke:#1D4ED8
-    style SVC fill:#16A34A,color:#fff,stroke:#15803D
-    style DB  fill:#DC2626,color:#fff,stroke:#B91C1C
-    style OpenAI fill:#D97706,color:#fff,stroke:#B45309
 ```
 
 ---
@@ -600,10 +596,6 @@ graph LR
     Exec --> State
     Hist --> State
 
-    style TUI    fill:#4F46E5,color:#fff,stroke:#4338CA
-    style Client fill:#7C3AED,color:#fff,stroke:#6D28D9
-    style Back   fill:#2563EB,color:#fff,stroke:#1D4ED8
-    style State  fill:#D97706,color:#fff,stroke:#B45309
 ```
 
 ---
@@ -625,82 +617,72 @@ sequenceDiagram
     participant DB  as SQLite
     participant OAI as OpenAI
 
-    rect rgb(220, 240, 255)
-        Note over User,CLI: App startup
-        User->>TUI: Launch app
-        TUI->>CLI: CheckHealth()
-        CLI->>API: GET /api/v1/health
-        API->>DB: ping
-        API->>MV: ping
-        API-->>CLI: 200 OK
-        CLI-->>TUI: Backend connected
-    end
+    Note over User,CLI: 1. App startup
+    User->>TUI: Launch app
+    TUI->>CLI: CheckHealth()
+    CLI->>API: GET /api/v1/health
+    API->>DB: ping
+    API->>MV: ping
+    API-->>CLI: 200 OK
+    CLI-->>TUI: Backend connected
 
-    rect rgb(220, 255, 230)
-        Note over User,OAI: PDF ingest (async)
-        User->>TUI: Upload PDF file
-        TUI->>CLI: Ingest(file)
-        CLI->>API: POST /api/v1/ingest
-        API->>JR: create_job(ingest)
-        API-->>CLI: {job_id}
-        CLI-->>TUI: Job queued
+    Note over User,OAI: 2. PDF ingest (async)
+    User->>TUI: Upload PDF file
+    TUI->>CLI: Ingest(file)
+    CLI->>API: POST /api/v1/ingest
+    API->>JR: create_job(ingest)
+    API-->>CLI: {job_id}
+    CLI-->>TUI: Job queued
 
-        JR->>PP: parse PDF
-        PP-->>JR: text + metadata
-        JR->>CK: chunk by prompt boundaries
-        CK-->>JR: prompt segments
-        JR->>DB: insert templates
-        DB-->>JR: template_ids
-        JR->>OAI: embed chunks
-        OAI-->>JR: vectors
-        JR->>MV: store vectors
-        MV-->>JR: ok
-        JR->>DB: mark job COMPLETED
+    JR->>PP: parse PDF
+    PP-->>JR: text + metadata
+    JR->>CK: chunk by prompt boundaries
+    CK-->>JR: prompt segments
+    JR->>DB: insert templates
+    DB-->>JR: template_ids
+    JR->>OAI: embed chunks
+    OAI-->>JR: vectors
+    JR->>MV: store vectors
+    MV-->>JR: ok
+    JR->>DB: mark job COMPLETED
 
-        TUI->>CLI: GetJobStatus(job_id)
-        CLI->>API: GET /api/v1/jobs/{job_id}
-        API->>DB: fetch job
-        DB-->>API: COMPLETED
-        API-->>CLI: status ok
-        CLI-->>TUI: Ingest complete
-    end
+    TUI->>CLI: GetJobStatus(job_id)
+    CLI->>API: GET /api/v1/jobs/{job_id}
+    API->>DB: fetch job
+    DB-->>API: COMPLETED
+    API-->>CLI: status ok
+    CLI-->>TUI: Ingest complete
 
-    rect rgb(255, 245, 220)
-        Note over User,TUI: Template selection
-        User->>TUI: Type query
-        User->>TUI: Select template
-        User->>TUI: Fill variables
-    end
+    Note over User,TUI: 3. Template selection
+    User->>TUI: Type query
+    User->>TUI: Select template
+    User->>TUI: Fill variables
 
-    rect rgb(240, 220, 255)
-        Note over User,DB: Recommendation pipeline
-        User->>TUI: Execute prompt
-        TUI->>CLI: Recommend(query, top_k, tradeoff)
-        CLI->>API: POST /api/v1/recommend
-        API->>MV: semantic search
-        MV-->>API: top-K vectors
-        API->>DB: fetch template metadata
-        DB-->>API: templates + scores
-        API->>API: BM25 lexical ranking
-        API->>API: hybrid rerank
-        API->>API: inject addons
-        API->>API: compute metrics
-        API-->>CLI: ranked results
-        CLI-->>TUI: recommendations
-        TUI-->>User: display results
-    end
+    Note over User,DB: 4. Recommendation pipeline
+    User->>TUI: Execute prompt
+    TUI->>CLI: Recommend(query, top_k, tradeoff)
+    CLI->>API: POST /api/v1/recommend
+    API->>MV: semantic search
+    MV-->>API: top-K vectors
+    API->>DB: fetch template metadata
+    DB-->>API: templates + scores
+    API->>API: BM25 lexical ranking
+    API->>API: hybrid rerank
+    API->>API: inject addons
+    API->>API: compute metrics
+    API-->>CLI: ranked results
+    CLI-->>TUI: recommendations
+    TUI-->>User: display results
 
-    rect rgb(220, 255, 245)
-        Note over User,DB: Feedback loop
-        User->>TUI: Rate result (1-5)
-        TUI->>CLI: SendFeedback(score)
-        CLI->>API: POST /api/v1/feedback
-        API->>DB: store feedback + execution
-        DB-->>API: ok
-        API-->>CLI: 200 OK
-        CLI-->>TUI: Saved
-        TUI->>TUI: persist session history
-    end
+    Note over User,DB: 5. Feedback loop
+    User->>TUI: Rate result (1-5)
+    TUI->>CLI: SendFeedback(score)
+    CLI->>API: POST /api/v1/feedback
+    API->>DB: store feedback + execution
+    DB-->>API: ok
+    API-->>CLI: 200 OK
+    CLI-->>TUI: Saved
+    TUI->>TUI: persist session history
 ```
 
 ---
