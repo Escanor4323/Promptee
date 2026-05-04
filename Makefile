@@ -1,4 +1,4 @@
-.PHONY: setup start stop test build clean go-test go-build
+.PHONY: setup start stop test build rebuild clean go-test go-build
 
 setup:
 	pip install -r backend/requirements.txt
@@ -13,15 +13,24 @@ stop:
 test:
 	cd backend && python -m pytest tests/ -v --cov=app --cov-report=term-missing
 
+# Build the CLI binary only (bin/promptee + ./promptee).
+# Run this first, THEN use './promptee build all' for Docker.
 build:
-	cd cmd/promptee && go build -o ../../bin/promptee .
+	go build -o bin/promptee ./cmd/promptee
+	cp bin/promptee ./promptee
+	@echo "✅  bin/promptee and ./promptee updated"
+
+go-build: build
+
+# Full rebuild: CLI binary first (while Docker is NOT re-building), then Docker.
+# Running go build + docker build + Milvus simultaneously causes OOM / killed.
+rebuild:
+	$(MAKE) build
+	./promptee build all
 
 clean:
 	rm -rf data/ bin/
 	find . -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
-
-go-build:
-	go build -o bin/promptee ./cmd/promptee
 
 go-test:
 	go test -race ./...

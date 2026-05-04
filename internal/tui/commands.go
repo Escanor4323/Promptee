@@ -29,8 +29,20 @@ type recommendResultMsg struct {
 }
 
 type ingestResultMsg struct {
-	resp *api.IngestResponse
+	resp *api.JobEnqueueResponse
 	err  error
+}
+
+// jobProgressMsg carries a job status poll result.
+type jobProgressMsg struct {
+	status *api.JobStatusResponse
+	err    error
+}
+
+// ingestEnqueueResultMsg signals a successful job enqueue and starts polling.
+type ingestEnqueueResultMsg struct {
+	jobID string
+	err   error
 }
 
 type healthResultMsg struct {
@@ -103,26 +115,55 @@ func doRecommend(client *api.Client, query string, topK int, tradeoffPreference 
 	return recommendResultMsg{resp: resp, err: err}
 }
 
-func doIngest(client *api.Client, path string) app.Msg {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-	req := api.IngestRequest{}
-	if strings.HasSuffix(path, "/") || strings.HasSuffix(path, "\\") {
-		req.Directory = strings.TrimRight(path, "/\\")
-	} else {
-		req.Paths = []string{path}
+// doIngest enqueues a single file or directory ingest job.
+// It returns an app.Cmd that, when run, yields an ingestEnqueueResultMsg.
+func doIngest(client *api.Client, path string) app.Cmd {
+	return func() app.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		req := api.IngestRequest{}
+		if strings.HasSuffix(path, "/") || strings.HasSuffix(path, "\\") {
+			req.Directory = strings.TrimRight(path, "/\\")
+		} else {
+			req.Paths = []string{path}
+		}
+		resp, err := client.Ingest(ctx, req)
+		if err != nil {
+			return ingestEnqueueResultMsg{err: err}
+		}
+		return ingestEnqueueResultMsg{jobID: resp.JobID}
 	}
-	resp, err := client.Ingest(ctx, req)
-	return ingestResultMsg{resp: resp, err: err}
 }
 
-func doBatchIngest(client *api.Client, paths []string) app.Msg {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-	req := api.IngestRequest{Paths: paths}
-	resp, err := client.Ingest(ctx, req)
-	return ingestResultMsg{resp: resp, err: err}
+// doBatchIngest enqueues an ingest job for multiple paths.
+// It returns an app.Cmd that, when run, yields an ingestEnqueueResultMsg.
+func doBatchIngest(client *api.Client, paths []string) app.Cmd {
+	return func() app.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		req := api.IngestRequest{Paths: paths}
+		resp, err := client.Ingest(ctx, req)
+		if err != nil {
+			return ingestEnqueueResultMsg{err: err}
+		}
+		return ingestEnqueueResultMsg{jobID: resp.JobID}
+	}
 }
+
+// doPollJob polls the backend for job status once, returning a jobProgressMsg.
+// The update handler re-fires this command if the job is still in-progress.
+func doPollJob(client *api.Client, jobID string) app.Cmd {
+	return func() app.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		status, err := client.GetJobStatus(ctx, jobID)
+		if err != nil {
+			return jobProgressMsg{err: err}
+		}
+		return jobProgressMsg{status: status}
+	}
+}
+
 
 func doHealthCheck(client *api.Client) app.Msg {
 	return healthResultMsg{err: client.CheckHealth(), explicit: true}
@@ -194,6 +235,19 @@ func doGetTelemetrySummary(client *api.Client) app.Msg {
 	return telemetrySummaryResultMsg{resp: resp, err: err}
 }
 
+type templatesListResultMsg struct {
+	items  []api.TemplateItem
+	sortBy string
+	err    error
+}
+
+func doListTemplates(client *api.Client, sortBy, order string) app.Cmd {
+	return func() app.Msg {
+		items, err := client.ListTemplates(context.Background(), sortBy, order)
+		return templatesListResultMsg{items: items, sortBy: sortBy, err: err}
+	}
+}
+
 func doFetchModels(client *api.Client) app.Msg {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -209,7 +263,7 @@ func doRegisterModel(client *api.Client, name, modelType string) app.Msg {
 }
 
 type dispatchResult struct {
-	cmd func() app.Msg
+	cmd app.Cmd
 	msg string
 }
 
@@ -241,12 +295,12 @@ func dispatchCommand(input string, client *api.Client, topK int, tradeoffPrefere
 		paths := strings.Fields(arg)
 		if len(paths) == 1 {
 			return dispatchResult{
-				cmd: func() app.Msg { return doIngest(client, paths[0]) },
+				cmd: doIngest(client, paths[0]),
 				msg: "Adding: " + paths[0],
 			}
 		}
 		return dispatchResult{
-			cmd: func() app.Msg { return doBatchIngest(client, paths) },
+			cmd: doBatchIngest(client, paths),
 			msg: fmt.Sprintf("Adding batch: %d paths", len(paths)),
 		}
 	case "/add-addon":
@@ -291,6 +345,55 @@ func dispatchCommand(input string, client *api.Client, topK int, tradeoffPrefere
 		return dispatchResult{
 			cmd: func() app.Msg { return doRegisterModel(client, arg, "claude") },
 			msg: "Adding model: " + arg,
+		}
+	case "/list":
+		// /list [--sort-by <field>] [--order <asc|desc>]
+		sortBy := "title"
+		order := "asc"
+		remaining := arg
+		for remaining != "" {
+			fields := strings.Fields(remaining)
+			if len(fields) == 0 {
+				break
+			}
+			if fields[0] == "--sort-by" && len(fields) >= 2 {
+				sortBy = strings.ToLower(fields[1])
+				if len(fields) > 2 {
+					remaining = strings.Join(fields[2:], " ")
+				} else {
+					remaining = ""
+				}
+			} else if fields[0] == "--order" && len(fields) >= 2 {
+				order = strings.ToLower(fields[1])
+				if order != "asc" && order != "desc" {
+					order = "asc"
+				}
+				if len(fields) > 2 {
+					remaining = strings.Join(fields[2:], " ")
+				} else {
+					remaining = ""
+				}
+			} else {
+				break
+			}
+		}
+		validSortFields := []string{"id", "title", "objective", "created_at", "updated_at"}
+		validField := false
+		for _, f := range validSortFields {
+			if f == sortBy {
+				validField = true
+				break
+			}
+		}
+		if !validField {
+			return dispatchResult{msg: fmt.Sprintf(
+				"Unknown sort field %q. Valid fields: %s",
+				sortBy, strings.Join(validSortFields, ", "),
+			)}
+		}
+		return dispatchResult{
+			cmd: doListTemplates(client, sortBy, order),
+			msg: fmt.Sprintf("Listing prompts (sort: %s %s)...", sortBy, order),
 		}
 	case "/clear":
 		return dispatchResult{msg: "__clear__"}
@@ -341,10 +444,47 @@ func parseNumSelection(input string) (int, bool) {
 	return n, true
 }
 
+// formatTemplateList renders a numbered table of template items.
+func formatTemplateList(items []api.TemplateItem, sortBy string) string {
+	if len(items) == 0 {
+		return "No prompts ingested yet. Use /add <path> to add your first prompt file."
+	}
+
+	const maxTitle = 52
+	const maxObjective = 55
+
+	truncate := func(s string, n int) string {
+		s = strings.ReplaceAll(s, "\n", " ")
+		if len(s) <= n {
+			return s
+		}
+		return s[:n-1] + "…"
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf(" %d prompts  (sorted by %s)\n\n", len(items), sortBy))
+	sb.WriteString(fmt.Sprintf(" %-4s  %-*s  %s\n", "ID", maxTitle, "Title", "Objective"))
+	sb.WriteString(" " + strings.Repeat("─", 4+2+maxTitle+2+maxObjective) + "\n")
+	for _, t := range items {
+		sb.WriteString(fmt.Sprintf(
+			" %-4d  %-*s  %s\n",
+			t.ID,
+			maxTitle,
+			truncate(t.Title, maxTitle),
+			truncate(t.Objective, maxObjective),
+		))
+	}
+	sb.WriteString(fmt.Sprintf("\n Sort fields: id, title, objective, created_at, updated_at"))
+	sb.WriteString(fmt.Sprintf("\n Usage:  /list --sort-by <field>  --order asc|desc"))
+	return sb.String()
+}
+
 func formatHelpText() string {
 	copyKey, pasteKey := getClipboardKeybindings()
 	return fmt.Sprintf(`Available commands:
  /add <path> [path2 ...]  — Add prompt file(s) to vector store
+ /list [--sort-by <field>] [--order asc|desc]  — List all ingested prompts
+   fields: id, title, objective, created_at, updated_at
  /add-addon <mode> <name> <file>  — Register a custom add-on (mode: speed|quality|cost)
  /model <name>            — Switch active model for telemetry tracking
  /add-model <name>        — Register new model in backend

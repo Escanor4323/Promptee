@@ -1,5 +1,7 @@
 """Pydantic request/response schemas for Promptee API endpoints."""
 
+from typing import Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -61,3 +63,29 @@ class BulkSearchResult(BaseModel):
     full_text: str
     variables: list[str]
     score: float
+
+
+# --- Job schemas ---
+
+
+class JobEnqueueResponse(BaseModel):
+    """Returned immediately (HTTP 202) when an async job is enqueued."""
+
+    job_id: str
+    status: str
+    status_url: str
+
+
+class JobStatusResponse(BaseModel):
+    """Returned by GET /jobs/{job_id} to poll async job progress."""
+
+    job_id: str
+    kind: str
+    status: str
+    progress_pct: float
+    current_step: str
+    completed_steps: int
+    total_steps: Optional[int]
+    eta_seconds: Optional[float]
+    error: Optional[str]
+    result: Optional[IngestResponse]

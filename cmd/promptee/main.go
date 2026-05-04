@@ -69,11 +69,17 @@ var buildBackendCmd = &cobra.Command{
 
 var buildAllCmd = &cobra.Command{
 	Use:   "all",
-	Short: "Rebuild everything (CLI and all Docker containers)",
+	Short: "Rebuild backend Docker image and start all services",
+	Long: `Rebuilds the backend Docker image and starts all infrastructure services.
+
+The CLI binary is NOT rebuilt here — doing so while Docker is running
+can exhaust memory (Go compiler + Docker build + Milvus all compete for RAM).
+
+To rebuild the CLI binary first, use:
+  make build            # builds bin/promptee AND copies to ./promptee
+  ./promptee build all  # then rebuild Docker + start services
+`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := runBuildCli(cmd, args); err != nil {
-			return err
-		}
 		return runBuildAll(cmd, args)
 	},
 }
@@ -219,6 +225,18 @@ func runBuildCli(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println("✅ CLI build complete: bin/promptee")
+
+	// Update ./promptee at the project root so the user can run it directly.
+	src := filepath.Join(projectRoot, "bin", "promptee")
+	dst := filepath.Join(projectRoot, "promptee")
+	cpCmd := exec.Command("cp", src, dst)
+	cpCmd.Stdout = os.Stdout
+	cpCmd.Stderr = os.Stderr
+	if err := cpCmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "⚠️  Could not copy bin/promptee → ./promptee: %v\n", err)
+	} else {
+		fmt.Println("✅ Root binary updated: ./promptee")
+	}
 	return nil
 }
 
@@ -248,21 +266,34 @@ func runBuildAll(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	composeFile := filepath.Join(projectRoot, "docker-compose.yml")
-	
+
 	if _, err := os.Stat(composeFile); os.IsNotExist(err) {
 		return fmt.Errorf("could not find docker-compose.yml at %s", composeFile)
 	}
 
 	fmt.Println("🚀 Starting zero-day build and infrastructure deployment...")
-	fmt.Println("🐳 Running docker compose up --build -d")
 
-	execCmd := exec.Command("docker", "compose", "-f", composeFile, "up", "--build", "-d")
-	execCmd.Stdout = os.Stdout
-	execCmd.Stderr = os.Stderr
-	execCmd.Dir = projectRoot
+	// Step 1: Build only the backend image (the only service with a build: section).
+	// Running "up --build -d" for all services simultaneously triggers heavy parallel
+	// image pulls (Milvus ~2 GB, MinIO, etcd, postgres) alongside the Docker build,
+	// which can exhaust memory and get the process killed by the OS.
+	fmt.Println("🐳 Building backend Docker image...")
+	buildCmd := exec.Command("docker", "compose", "-f", composeFile, "build", "backend")
+	buildCmd.Stdout = os.Stdout
+	buildCmd.Stderr = os.Stderr
+	buildCmd.Dir = projectRoot
+	if err := buildCmd.Run(); err != nil {
+		return fmt.Errorf("docker compose build failed: %w", err)
+	}
 
-	if err := execCmd.Run(); err != nil {
-		return fmt.Errorf("docker compose failed: %w", err)
+	// Step 2: Start all services (infra images are pulled/cached independently).
+	fmt.Println("🐳 Starting all services...")
+	upCmd := exec.Command("docker", "compose", "-f", composeFile, "up", "-d")
+	upCmd.Stdout = os.Stdout
+	upCmd.Stderr = os.Stderr
+	upCmd.Dir = projectRoot
+	if err := upCmd.Run(); err != nil {
+		return fmt.Errorf("docker compose up failed: %w", err)
 	}
 
 	return waitForBackend()

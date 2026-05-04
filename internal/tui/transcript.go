@@ -525,6 +525,105 @@ func (s ToolUseBlockSegment) NodeRender() node.Node {
 	return node.Box(node.BorderRounded, node.Column(title, content))
 }
 
+
+// IngestProgressSegment represents an in-progress ingest job with real-time progress tracking.
+type IngestProgressSegment struct {
+	JobID          string
+	Status         string   // "pending", "processing", "completed", "failed"
+	ProgressPct    float64  // 0-100
+	CurrentStep    string   // e.g., "parsing_files", "chunking", "embedding"
+	CompletedSteps int
+	TotalSteps     int
+	ETASeconds     *float64 // nil if not yet computed
+	Error          *string  // nil if no error
+}
+
+func (s IngestProgressSegment) Render() string {
+	if s.Status == "failed" {
+		errMsg := "unknown error"
+		if s.Error != nil {
+			errMsg = *s.Error
+		}
+		return fmt.Sprintf("[!] Ingest failed: %s", errMsg)
+	}
+
+	if s.Status == "completed" {
+		return fmt.Sprintf("[ok] Ingest completed")
+	}
+
+	// pending and processing: show progress bar
+	const barWidth = 20
+	filledWidth := int(float64(barWidth) * s.ProgressPct / 100)
+	if filledWidth < 0 {
+		filledWidth = 0
+	}
+	if filledWidth > barWidth {
+		filledWidth = barWidth
+	}
+	emptyWidth := barWidth - filledWidth
+
+	bar := fmt.Sprintf("[%s%s]", strings.Repeat("█", filledWidth), strings.Repeat("░", emptyWidth))
+	step := s.CurrentStep
+	if step == "" {
+		step = "initializing"
+	}
+
+	etaStr := ""
+	if s.ProgressPct >= 5.0 && s.ETASeconds != nil && *s.ETASeconds >= 1 {
+		etaStr = fmt.Sprintf(" · ETA %.0fs", *s.ETASeconds)
+	}
+
+	return fmt.Sprintf("%s %.0f%% %s%s", bar, s.ProgressPct, step, etaStr)
+}
+
+func (s IngestProgressSegment) NodeRender() node.Node {
+	if s.Status == "failed" {
+		errMsg := "unknown error"
+		if s.Error != nil {
+			errMsg = *s.Error
+		}
+		return node.Row(
+			node.TextStyled("✗", colorRed, colorDefault, node.Bold),
+			node.TextStyled(" Ingest failed: "+errMsg, colorRed, colorDefault, 0),
+		)
+	}
+
+	if s.Status == "completed" {
+		return node.Row(
+			node.TextStyled("✓", colorGreen, colorDefault, node.Bold),
+			node.TextStyled(" Ingest completed", colorGreen, colorDefault, 0),
+		)
+	}
+
+	// pending and processing: show progress bar
+	const barWidth = 20
+	filledWidth := int(float64(barWidth) * s.ProgressPct / 100)
+	if filledWidth < 0 {
+		filledWidth = 0
+	}
+	if filledWidth > barWidth {
+		filledWidth = barWidth
+	}
+	emptyWidth := barWidth - filledWidth
+
+	step := s.CurrentStep
+	if step == "" {
+		step = "initializing"
+	}
+
+	etaStr := ""
+	if s.ProgressPct >= 5.0 && s.ETASeconds != nil && *s.ETASeconds >= 1 {
+		etaStr = fmt.Sprintf(" · ETA %.0fs", *s.ETASeconds)
+	}
+
+	label := fmt.Sprintf(" %.0f%% %s%s", s.ProgressPct, step, etaStr)
+	return node.Row(
+		node.TextStyled(strings.Repeat("█", filledWidth), colorOrange, colorDefault, 0),
+		node.TextStyled(strings.Repeat("░", emptyWidth), colDimGray, colorDefault, 0),
+		node.TextStyled(label, colWhite, colorDefault, 0),
+	)
+}
+
 // --- Transcript ---
 
 type Transcript struct {
@@ -615,6 +714,19 @@ func (t *Transcript) ReplaceLastToolUse(s ToolUseBlockSegment) bool {
 		}
 	}
 	return false
+}
+
+
+// ReplaceLastIngestProgress updates the last IngestProgressSegment in the transcript.
+// If the last segment is not an IngestProgressSegment, appends a new one.
+func (t *Transcript) ReplaceLastIngestProgress(seg IngestProgressSegment) {
+	if len(t.segments) > 0 {
+		if _, ok := t.segments[len(t.segments)-1].(IngestProgressSegment); ok {
+			t.segments[len(t.segments)-1] = seg
+			return
+		}
+	}
+	t.segments = append(t.segments, seg)
 }
 
 // --- Markdown rendering (ported from maude reference design) ---

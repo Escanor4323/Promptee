@@ -96,7 +96,9 @@ async def seeded_templates(e2e_client: AsyncClient) -> list[dict]:
 async def test_health_check(e2e_client: AsyncClient) -> None:
     response = await e2e_client.get("/api/v1/health")
     assert response.status_code == 200
-    assert response.json()["status"] == "ok"
+    data = response.json()
+    assert data["status"] == "healthy"
+    assert "database" in data
 
 
 @pytest.mark.asyncio

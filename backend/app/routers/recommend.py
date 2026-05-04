@@ -4,6 +4,9 @@ Embeds the query, searches Milvus for top-N semantic results, then
 reranks them using historical telemetry data from SQLite and applies
 PromptAddOn injection based on the user's tradeoff preference.
 Full text is fetched from SQLite (moved from Milvus for deduplication).
+
+BM25 hybrid scoring is applied client-side after fetching full_text,
+blending dense cosine similarity with keyword precision.
 """
 
 import logging
@@ -21,12 +24,16 @@ from app.schemas import (
     RecommendResponse,
 )
 from app.services.addon import get_addons_for_preference
+from app.services.bm25_scorer import compute_bm25_scores
 from app.services.embedder import embed
 from app.services.reranker import rerank
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["recommend"])
+
+DENSE_WEIGHT = 0.7
+BM25_WEIGHT = 0.3
 
 
 @router.post("/recommend", response_model=RecommendResponse)
@@ -74,7 +81,9 @@ async def recommend_prompts(request: RecommendRequest) -> RecommendResponse:
         for a in addons
     ]
 
-    items: list[RecommendItem] = []
+    # Fetch full_text for each reranked result
+    full_texts: list[str] = []
+    enriched: list[tuple[dict, str]] = []
     async with async_session() as session:
         for r in reranked:
             template_id = r.get("template_id", 0)
@@ -84,16 +93,31 @@ async def recommend_prompts(request: RecommendRequest) -> RecommendResponse:
                     select(Template.full_text).where(Template.id == template_id)
                 )
                 full_text = result.scalar_one_or_none() or ""
-            items.append(RecommendItem(
-                id=r["id"],
-                template_id=template_id,
-                title=r["title"],
-                objective=r.get("objective", ""),
-                full_text=full_text,
-                variables=r.get("variables", []),
-                hybrid_score=r.get("hybrid_score", 0.0),
-                applicable_addons=addon_schemas,
-            ))
+            full_texts.append(full_text)
+            enriched.append((r, full_text))
+
+    # Apply BM25 hybrid scoring: blend dense cosine score with keyword relevance
+    bm25_scores = compute_bm25_scores(request.query, full_texts)
+    for i, (r, _) in enumerate(enriched):
+        dense_score = r.get("hybrid_score", 0.0)
+        r["hybrid_score"] = DENSE_WEIGHT * dense_score + BM25_WEIGHT * bm25_scores[i]
+
+    # Re-sort by updated hybrid score descending
+    enriched.sort(key=lambda pair: pair[0].get("hybrid_score", 0.0), reverse=True)
+
+    items: list[RecommendItem] = [
+        RecommendItem(
+            id=r["id"],
+            template_id=r.get("template_id", 0),
+            title=r["title"],
+            objective=r.get("objective", ""),
+            full_text=full_text,
+            variables=r.get("variables", []),
+            hybrid_score=r.get("hybrid_score", 0.0),
+            applicable_addons=addon_schemas,
+        )
+        for r, full_text in enriched
+    ]
 
     logger.info(
         "Returning %d recommendations for query: %s (preference=%s)",

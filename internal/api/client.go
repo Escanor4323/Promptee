@@ -7,7 +7,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
+)
+
+const (
+	healthCheckTimeout = 2 * time.Second
+	jobStatusTimeout   = 10 * time.Second
 )
 
 // Client wraps an http.Client for communicating with the Promptee backend.
@@ -26,7 +32,7 @@ func NewClient(baseURL string) *Client {
 
 // CheckHealth queries the backend /api/v1/health endpoint.
 func (c *Client) CheckHealth() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), healthCheckTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/api/v1/health", nil)
 	if err != nil {
@@ -60,14 +66,14 @@ type AddOn struct {
 
 // RecommendResult is a single recommendation from the backend.
 type RecommendResult struct {
-	ID               int     `json:"id"`
-	TemplateID       int     `json:"template_id"`
-	Title            string  `json:"title"`
-	Objective        string  `json:"objective"`
-	FullText         string  `json:"full_text"`
+	ID               int      `json:"id"`
+	TemplateID       int      `json:"template_id"`
+	Title            string   `json:"title"`
+	Objective        string   `json:"objective"`
+	FullText         string   `json:"full_text"`
 	Variables        []string `json:"variables"`
-	HybridScore      float64 `json:"hybrid_score"`
-	ApplicableAddons []AddOn `json:"applicable_addons"`
+	HybridScore      float64  `json:"hybrid_score"`
+	ApplicableAddons []AddOn  `json:"applicable_addons"`
 }
 
 // RecommendResponse is the response from POST /api/v1/recommend.
@@ -131,11 +137,11 @@ type TelemetryResponse struct {
 }
 
 type TelemetrySummaryResponse struct {
-	TotalExecutions int               `json:"total_executions"`
-	AvgQualityScore float64           `json:"avg_quality_score"`
-	ByCategory      map[string]int    `json:"by_category"`
+	TotalExecutions int                `json:"total_executions"`
+	AvgQualityScore float64            `json:"avg_quality_score"`
+	ByCategory      map[string]int     `json:"by_category"`
 	Percentages     map[string]float64 `json:"percentages"`
-	ByModel         map[string]int    `json:"by_model"`
+	ByModel         map[string]int     `json:"by_model"`
 	ModelQuality    map[string]float64 `json:"model_quality"`
 }
 
@@ -180,14 +186,37 @@ type IngestRequest struct {
 	Directory string   `json:"directory,omitempty"`
 }
 
-// IngestResponse is the response from POST /api/v1/ingest.
+// IngestResponse is the completed ingest result, returned inside JobStatusResponse.Result
+// when a job reaches the "completed" state.
 type IngestResponse struct {
 	Ingested int      `json:"ingested"`
 	Titles   []string `json:"titles"`
 }
 
-// Ingest calls POST /api/v1/ingest and returns parsed results.
-func (c *Client) Ingest(ctx context.Context, req IngestRequest) (*IngestResponse, error) {
+// JobEnqueueResponse is the 202 Accepted response from POST /api/v1/ingest.
+type JobEnqueueResponse struct {
+	JobID     string `json:"job_id"`
+	Status    string `json:"status"`
+	StatusURL string `json:"status_url"`
+}
+
+// JobStatusResponse is the response from GET /api/v1/jobs/{jobID}.
+// TotalSteps, ETASeconds, Error, and Result are nullable and may be nil.
+type JobStatusResponse struct {
+	JobID          string          `json:"job_id"`
+	Kind           string          `json:"kind"`
+	Status         string          `json:"status"` // "pending", "processing", "completed", "failed", "cancelled"
+	ProgressPct    float64         `json:"progress_pct"`
+	CurrentStep    string          `json:"current_step"`
+	CompletedSteps int             `json:"completed_steps"`
+	TotalSteps     *int            `json:"total_steps"`  // nullable
+	ETASeconds     *float64        `json:"eta_seconds"`  // nullable
+	Error          *string         `json:"error"`        // nullable
+	Result         *IngestResponse `json:"result"`       // nullable, populated on completion
+}
+
+// Ingest calls POST /api/v1/ingest and returns a job enqueue response (202 Accepted).
+func (c *Client) Ingest(ctx context.Context, req IngestRequest) (*JobEnqueueResponse, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("marshal ingest request: %w", err)
@@ -202,14 +231,40 @@ func (c *Client) Ingest(ctx context.Context, req IngestRequest) (*IngestResponse
 		return nil, fmt.Errorf("ingest request failed: %w", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		var bodyBytes []byte
-		bodyBytes, _ = io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusAccepted {
+		bodyBytes, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("ingest returned status %d: %s", resp.StatusCode, string(bodyBytes))
 	}
-	var result IngestResponse
+	var result JobEnqueueResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("decode ingest response: %w", err)
+	}
+	return &result, nil
+}
+
+// GetJobStatus polls GET /api/v1/jobs/{jobID} and returns the current job state.
+func (c *Client) GetJobStatus(ctx context.Context, jobID string) (*JobStatusResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, jobStatusTimeout)
+	defer cancel()
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/api/v1/jobs/"+url.PathEscape(jobID), nil)
+	if err != nil {
+		return nil, fmt.Errorf("create job status request: %w", err)
+	}
+	resp, err := c.HTTPClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("job status request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("job not found: %s", jobID)
+	}
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("job status returned status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+	var result JobStatusResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode job status response: %w", err)
 	}
 	return &result, nil
 }
@@ -368,6 +423,51 @@ func (c *Client) RegisterModel(ctx context.Context, req RegisterModelRequest) (*
 		return nil, fmt.Errorf("decode register model response: %w", err)
 	}
 	return &result, nil
+}
+
+// TemplateItem is a single prompt template returned by GET /api/v1/templates.
+type TemplateItem struct {
+	ID        int      `json:"id"`
+	Title     string   `json:"title"`
+	Objective string   `json:"objective"`
+	Variables []string `json:"variables"`
+	CreatedAt string   `json:"created_at"`
+	UpdatedAt string   `json:"updated_at"`
+}
+
+// ListTemplates fetches all ingested prompt templates, sorted by the given field and direction.
+// sortBy must be one of: id, title, objective, created_at, updated_at.
+// order must be "asc" or "desc".
+func (c *Client) ListTemplates(ctx context.Context, sortBy, order string) ([]TemplateItem, error) {
+	u := c.BaseURL + "/api/v1/templates"
+	if sortBy != "" || order != "" {
+		params := url.Values{}
+		if sortBy != "" {
+			params.Set("sort_by", sortBy)
+		}
+		if order != "" {
+			params.Set("order", order)
+		}
+		u += "?" + params.Encode()
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create list templates request: %w", err)
+	}
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("list templates request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("list templates returned status %d: %s", resp.StatusCode, string(body))
+	}
+	var items []TemplateItem
+	if err := json.NewDecoder(resp.Body).Decode(&items); err != nil {
+		return nil, fmt.Errorf("decode list templates response: %w", err)
+	}
+	return items, nil
 }
 
 // AddonRecommendRequest is the body for POST /api/v1/addons/recommend.

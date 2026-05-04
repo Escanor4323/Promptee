@@ -75,41 +75,50 @@ def get_or_create_collection() -> Collection:
     return _collection
 
 
-def insert_chunks(chunks: list, embeddings: list, template_ids: list[int]) -> list[int]:
-    """Insert chunked documents with their embeddings into Milvus.
+def insert_chunks(
+    child_texts: list[str],
+    embeddings: list,
+    template_ids: list[int],
+    chunk_indices: list[int],
+    token_counts: list[int],
+    parent_titles: list[str],
+) -> list[int]:
+    """Insert child chunk embeddings into Milvus with parent metadata.
 
-    Data is built as a list of row-level dicts (field_name -> value) so
-    pymilvus binds values to the schema by name rather than positional
-    column order. The auto_id `id` field is intentionally omitted.
+    Each row stores the parent's template_id pointer so that retrieval can
+    fetch the full unfragmented prompt from SQLite (ADR-006 hierarchical
+    retrieval pattern). child_texts are embedded but not stored in Milvus;
+    only the dense vector and the parent metadata are persisted.
 
-    Returns list of inserted IDs.
+    Data is built as a list of row-level dicts so pymilvus binds by field
+    name rather than positional order. The auto_id `id` field is omitted.
+
+    Returns list of inserted primary key IDs.
     """
     collection = get_or_create_collection()
 
-    if len(chunks) != len(template_ids):
-        raise ValueError(
-            f"insert_chunks: len(chunks)={len(chunks)} != len(template_ids)={len(template_ids)}"
-        )
-    if len(chunks) != len(embeddings):
-        raise ValueError(
-            f"insert_chunks: len(chunks)={len(chunks)} != len(embeddings)={len(embeddings)}"
-        )
+    n = len(child_texts)
+    if len(embeddings) != n:
+        raise ValueError(f"insert_chunks: len(embeddings)={len(embeddings)} != {n}")
+    if len(template_ids) != n:
+        raise ValueError(f"insert_chunks: len(template_ids)={len(template_ids)} != {n}")
+    if len(parent_titles) != n:
+        raise ValueError(f"insert_chunks: len(parent_titles)={len(parent_titles)} != {n}")
 
     rows: list[dict] = []
-    for chunk, embedding, template_id in zip(chunks, embeddings, template_ids):
-        # Convert numpy arrays to plain python lists for pymilvus compatibility.
+    for embedding, template_id, title in zip(embeddings, template_ids, parent_titles):
         vector = embedding.tolist() if hasattr(embedding, "tolist") else list(embedding)
         rows.append({
             "template_id": int(template_id),
             "vector": vector,
-            "title": chunk.title,
-            "objective": chunk.objective,
-            "variables": json.dumps(chunk.variables),
+            "title": (title or "")[:256],
+            "objective": "",
+            "variables": "[]",
         })
 
     result = collection.insert(rows)
     collection.flush()
-    logger.info("Inserted %d chunks into Milvus", len(rows))
+    logger.info("Inserted %d child chunks into Milvus", len(rows))
     return list(result.primary_keys)
 
 

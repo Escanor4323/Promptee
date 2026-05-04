@@ -79,14 +79,19 @@ def chunk_file_auto(file_path: str) -> list[Chunk]:
 
     Routes by extension:
     - .md, .markdown → schema-aware markdown chunker (existing behavior)
-    - .pdf → PDF extraction + semantic chunking
-    - .txt and others → semantic chunking
+    - .pdf → PDF extraction + CascadingDetector (prompt-boundary aware)
+    - .txt and others → CascadingDetector
+
+    The CascadingDetector (ADR-006) anchors on Objective: markers and
+    strict heading patterns, so it never splits on numbered list items
+    inside a prompt body — preventing the over-splitting that caused
+    TOO_MANY_PARENTS errors on dense prompt PDFs.
 
     Args:
         file_path: Path to the file.
 
     Returns:
-        List of Chunk objects.
+        List of Chunk objects (one per detected parent prompt).
 
     Raises:
         FileNotFoundError: If the file does not exist.
@@ -101,14 +106,36 @@ def chunk_file_auto(file_path: str) -> list[Chunk]:
 
     if suffix == ".pdf":
         from app.services import pdf_parser
-        from app.services import semantic_chunker
-
         text = pdf_parser.extract_text(file_path)
-        return semantic_chunker.chunk_semantic(text)
+    else:
+        with open(file_path, encoding="utf-8") as f:
+            text = f.read()
 
-    # Default: treat as plain text and apply semantic chunking
-    from app.services import semantic_chunker
+    # #region agent log f0c062
+    import logging as _log, re as _re
+    _logger = _log.getLogger(__name__)
+    _all_obj = list(_re.finditer(r"objective", text, _re.IGNORECASE))
+    _line_start_obj = list(_re.finditer(r"^[ \t]*(?:\*\*)?objective\s*:", text, _re.IGNORECASE | _re.MULTILINE))
+    _logger.info("[f0c062] total 'objective' occurrences=%d, line-start matches=%d", len(_all_obj), len(_line_start_obj))
+    # Log first 500 chars around each non-line-start occurrence
+    _line_start_positions = {m.start() for m in _line_start_obj}
+    for _m in _all_obj[:25]:
+        if _m.start() not in _line_start_positions:
+            _ctx_start = max(0, _m.start() - 80)
+            _ctx_end = min(len(text), _m.end() + 80)
+            _logger.info("[f0c062] MISSED objective at pos %d ctx=%r", _m.start(), text[_ctx_start:_ctx_end])
+    # #endregion agent log f0c062
 
-    with open(file_path, encoding="utf-8") as f:
-        text = f.read()
-    return semantic_chunker.chunk_semantic(text)
+    from app.services.prompt_detector import CascadingDetector
+    detector = CascadingDetector()
+    spans = detector.detect_prompts(text)
+
+    return [
+        Chunk(
+            title=span.title,
+            objective=span.objective or "",
+            full_text=span.content,
+            variables=_extract_variables(span.content),
+        )
+        for span in spans
+    ]

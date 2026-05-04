@@ -9,7 +9,8 @@ import os
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy import inspect as sa_inspect
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 logger = logging.getLogger(__name__)
@@ -93,24 +94,125 @@ async def async_session() -> AsyncGenerator[AsyncSession, None]:
 
 
 async def init_db() -> None:
-    """Create all database tables.
+    """Create all database tables and verify they exist.
 
     Safe to call multiple times -- SQLAlchemy ``create_all`` is idempotent
     for existing tables. For SQLite, also ensures data directory exists.
+
+    Raises:
+        RuntimeError: If database tables cannot be created or verified.
     """
-    # Ensure SQLite data directory exists (no-op for PostgreSQL)
-    if "sqlite" in DATABASE_URL:
-        db_dir = os.path.dirname(
-            os.getenv("PROMPTEE_DB_PATH", os.path.join("./data", "promptee.db"))
+    try:
+        # Ensure SQLite data directory exists (no-op for PostgreSQL)
+        if "sqlite" in DATABASE_URL:
+            db_dir = os.path.dirname(
+                os.getenv("PROMPTEE_DB_PATH", os.path.join("./data", "promptee.db"))
+            )
+            if db_dir:
+                os.makedirs(db_dir, exist_ok=True)
+                logger.info("Ensured database directory exists: %s", db_dir)
+
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+            logger.debug("Base.metadata.create_all() completed")
+
+        # Verify all required tables were created
+        await verify_tables_exist(engine)
+        status = await get_database_status(engine)
+        logger.info(
+            "Database initialized: %d tables at %s (size: %s bytes)",
+            status["table_count"],
+            status["db_path"],
+            status["db_size"],
         )
-        if db_dir:
-            os.makedirs(db_dir, exist_ok=True)
-            logger.info("Ensured database directory exists: %s", db_dir)
+    except Exception as exc:
+        logger.error(
+            "Failed to initialize database: %s",
+            exc,
+            exc_info=True,
+        )
+        raise RuntimeError(f"Database initialization failed: {exc}") from exc
 
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
 
-    if "postgresql" in DATABASE_URL:
-        logger.info("Database tables created / verified in PostgreSQL")
-    else:
-        logger.info("Database tables created / verified in SQLite")
+# ---------------------------------------------------------------------------
+# Introspection helpers
+# ---------------------------------------------------------------------------
+
+# All tables that must exist for the application to function correctly.
+REQUIRED_TABLES: frozenset[str] = frozenset(
+    {"jobs", "templates", "executions", "feedback", "models", "model_preferences"}
+)
+
+
+async def verify_tables_exist(db_engine: AsyncEngine | None = None) -> bool:
+    """Verify all required application tables are present in the database.
+
+    Args:
+        db_engine: Optional SQLAlchemy async engine to use.  Defaults to the
+            module-level ``engine``.
+
+    Returns:
+        True when all required tables are present.
+
+    Raises:
+        RuntimeError: When one or more required tables are missing, listing
+            each missing table name in the message.
+    """
+    from sqlalchemy import inspect as sa_inspect
+
+    target_engine = db_engine if db_engine is not None else engine
+
+    async with target_engine.connect() as conn:
+        existing: set[str] = set(
+            await conn.run_sync(
+                lambda sync_conn: sa_inspect(sync_conn).get_table_names()
+            )
+        )
+
+    missing = [t for t in REQUIRED_TABLES if t not in existing]
+    if missing:
+        raise RuntimeError(
+            f"Required database tables are missing: {', '.join(missing)}"
+        )
+    return True
+
+
+async def get_database_status(db_engine: AsyncEngine | None = None) -> dict:
+    """Return a snapshot of database health metadata.
+
+    Args:
+        db_engine: Optional SQLAlchemy async engine to use.  Defaults to the
+            module-level ``engine``.
+
+    Returns:
+        A dict with keys:
+
+        - ``db_path`` (str): The database connection URL / path.
+        - ``db_size`` (int): File size in bytes for SQLite; ``-1`` for other
+          backends or when size is unavailable.
+        - ``table_count`` (int): Number of tables currently in the database.
+    """
+    import pathlib
+    from sqlalchemy import inspect as sa_inspect
+
+    target_engine = db_engine if db_engine is not None else engine
+
+    async with target_engine.connect() as conn:
+        table_names: list[str] = await conn.run_sync(
+            lambda sync_conn: sa_inspect(sync_conn).get_table_names()
+        )
+
+    url_str = str(target_engine.url)
+    db_size: int = -1
+    if "sqlite" in url_str:
+        # Extract file path from e.g. sqlite+aiosqlite:///./data/promptee.db
+        raw_path = url_str.split("///", 1)[-1]
+        if raw_path and raw_path != ":memory:":
+            p = pathlib.Path(raw_path)
+            db_size = p.stat().st_size if p.exists() else 0
+
+    return {
+        "db_path": url_str,
+        "db_size": db_size,
+        "table_count": len(table_names),
+    }

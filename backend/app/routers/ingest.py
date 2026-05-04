@@ -1,33 +1,44 @@
 """POST /api/v1/ingest endpoint for document ingestion pipeline.
 
-Ingests markdown/PDF prompt templates into Milvus AND creates corresponding
-SQLite Template records with content_hash deduplication.
+Validates the request synchronously and enqueues an async background job.
+Returns HTTP 202 with a job_id immediately; poll /api/v1/jobs/{job_id} for status.
 """
 
-import hashlib
-import json
+import asyncio
 import logging
 from pathlib import Path
 from typing import Callable
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from starlette.responses import JSONResponse
 
-from app.db.milvus import get_or_create_collection, insert_chunks
-from app.db.sqlite import async_session
-from app.models.templates import Template
-from app.schemas import IngestRequest, IngestResponse
-from app.services.chunker import Chunk, chunk_file_auto
-from app.services.embedder import embed_batch
+from app.schemas import IngestRequest, JobEnqueueResponse
+from app.services.chunker import chunk_file_auto
+from app.services.ingest_validator import IngestValidationError, validate_parents
 from app.services.path_resolver import get_path_resolver, PathResolutionError
+import app.services.job_runner as job_runner
+from app.services.ingest_job import run_ingest_job
+from app.services.job_runner import ProgressEmitter
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["ingest"])
 
+# Module-level task set — holds strong references to prevent GC of running tasks
+_active_tasks: set[asyncio.Task] = set()
 
-def _collect_file_paths(paths: list[str], directory: str | None, resolve: Callable) -> list[Path]:
-    """Resolve and validate all markdown file paths from the request."""
+
+def _collect_file_paths(
+    paths: list[str],
+    directory: str | None,
+    resolve: Callable,
+) -> tuple[list[Path], str | None]:
+    """Resolve and validate all markdown/PDF file paths from the request.
+
+    Returns a tuple of (unique resolved Path list, resolved directory string or None).
+    Raises HTTPException on invalid inputs.
+    Runs synchronously before the job is enqueued so errors surface immediately as 400.
+    """
     file_paths: list[Path] = []
     for p in paths:
         try:
@@ -39,6 +50,8 @@ def _collect_file_paths(paths: list[str], directory: str | None, resolve: Callab
         if not path.is_file():
             raise HTTPException(status_code=400, detail=f"Path is not a file: {p}")
         file_paths.append(path)
+
+    resolved_directory: str | None = None
     if directory is not None:
         try:
             dir_path = resolve(directory).container_path
@@ -48,107 +61,100 @@ def _collect_file_paths(paths: list[str], directory: str | None, resolve: Callab
             raise HTTPException(status_code=400, detail=f"Directory not found: {directory}")
         if not dir_path.is_dir():
             raise HTTPException(status_code=400, detail=f"Path is not a directory: {directory}")
-        md_files = sorted(dir_path.glob("*.md"))
-        pdf_files = sorted(dir_path.glob("*.pdf"))
-        all_files = md_files + pdf_files
-        logger.info("Globbed %d *.md + %d *.pdf files from directory: %s", len(md_files), len(pdf_files), directory)
-        file_paths.extend(all_files)
+        resolved_directory = str(dir_path)
+
+    # Deduplicate while preserving order
     seen: set[Path] = set()
     unique_paths: list[Path] = []
     for fp in file_paths:
         if fp.resolve() not in seen:
             seen.add(fp.resolve())
             unique_paths.append(fp)
-    return unique_paths
+
+    return unique_paths, resolved_directory
 
 
-@router.post("/ingest", response_model=IngestResponse)
+@router.post("/ingest", response_model=JobEnqueueResponse, status_code=202)
 async def ingest_documents(
     request: IngestRequest,
     resolve: Callable = Depends(get_path_resolver),
-) -> IngestResponse:
-    """Ingest markdown prompt templates into the vector database.
+) -> JSONResponse:
+    """Enqueue an async ingest job and return immediately with a job_id.
 
-    Pipeline: chunk -> embed -> create SQLite Templates -> insert Milvus -> backfill milvus_id.
-    Each chunk produces one Milvus vector AND one SQLite Template row,
-    linked by template_id stored in Milvus metadata.
+    Validation errors (missing files, invalid paths) are returned synchronously
+    as 400/422. The actual ingestion pipeline runs in the background.
+
+    Poll GET /api/v1/jobs/{job_id} for status and results.
     """
     if not request.paths and not request.directory:
-        raise HTTPException(status_code=400, detail="At least one of 'paths' or 'directory' must be provided")
-    file_paths = _collect_file_paths(request.paths, request.directory, resolve)
-    if not file_paths:
-        raise HTTPException(status_code=400, detail="No supported files found (.md, .pdf)")
-    all_chunks: list[Chunk] = []
-    for fp in file_paths:
-        try:
-            chunks = chunk_file_auto(str(fp))
-            logger.info("Extracted %d chunks from %s", len(chunks), fp)
-            all_chunks.extend(chunks)
-        except OSError as exc:
-            raise HTTPException(status_code=500, detail=f"Failed to read file {fp}: {exc}")
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=f"Invalid file {fp}: {exc}")
-    if not all_chunks:
-        return IngestResponse(ingested=0, titles=[])
-
-    embed_texts = [f"{c.title} {c.objective}".strip() for c in all_chunks]
-    try:
-        embeddings = embed_batch(embed_texts)
-    except RuntimeError as exc:
-        raise HTTPException(status_code=500, detail=f"Embedding generation failed: {exc}")
-
-    # Create SQLite Template records first to get template_ids
-    # Compute content hashes and check for duplicates
-    template_ids: list[int] = []
-    async with async_session() as session:
-        for chunk in all_chunks:
-            content_hash = hashlib.sha256(chunk.full_text.encode()).hexdigest()
-            # Check if this content already exists (deduplication)
-            result = await session.execute(
-                select(Template).where(Template.content_hash == content_hash)
-            )
-            existing = result.scalar_one_or_none()
-            if existing is not None:
-                logger.info("Skipping duplicate content (hash=%s, title=%s)", content_hash, chunk.title)
-                template_ids.append(existing.id)
-                continue
-            template = Template(
-                milvus_id=None,
-                title=chunk.title,
-                objective=chunk.objective,
-                variables=json.dumps(chunk.variables),
-                full_text=chunk.full_text,
-                content_hash=content_hash,
-            )
-            session.add(template)
-            await session.flush()
-            template_ids.append(template.id)
-
-    if len(template_ids) != len(all_chunks):
-        raise HTTPException(status_code=500, detail="Failed to create all SQLite Template records")
-
-    try:
-        get_or_create_collection()
-        milvus_ids = insert_chunks(
-            all_chunks,
-            [embeddings[i] for i in range(len(all_chunks))],
-            template_ids,
+        raise HTTPException(
+            status_code=400,
+            detail="At least one of 'paths' or 'directory' must be provided",
         )
-    except Exception as exc:
-        logger.error("Milvus insertion failed: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Milvus insertion failed: {exc}")
 
-    # Update SQLite Template rows with their Milvus IDs
-    async with async_session() as session:
-        for template_id, milvus_id in zip(template_ids, milvus_ids):
-            result = await session.execute(
-                select(Template).where(Template.id == template_id)
-            )
-            template = result.scalar_one_or_none()
-            if template is not None:
-                template.milvus_id = milvus_id
-            await session.flush()
+    # Validate paths synchronously — return 400 immediately on bad input
+    file_paths, resolved_directory = _collect_file_paths(
+        request.paths, request.directory, resolve
+    )
 
-    titles = [c.title for c in all_chunks]
-    logger.info("Ingested %d chunks with %d SQLite Template records", len(all_chunks), len(template_ids))
-    return IngestResponse(ingested=len(all_chunks), titles=titles)
+    # Pre-validate: parse documents and check parent count synchronously.
+    # This enables proper HTTP 422 responses instead of async job failures
+    # when a document exceeds MAX_PARENTS_PER_INGEST (25 prompts).
+    # Enumerate both explicit paths AND directory files so the 422 gate
+    # fires for directory-based ingests too.
+    all_chunks = []
+    pre_validate_paths: list[Path] = list(file_paths)
+    if resolved_directory is not None:
+        dir_path = Path(resolved_directory)
+        pre_validate_paths.extend(sorted(dir_path.glob("*.md")))
+        pre_validate_paths.extend(sorted(dir_path.glob("*.pdf")))
+
+    for fp in pre_validate_paths:
+        try:
+            chunks = await asyncio.to_thread(chunk_file_auto, str(fp))
+            all_chunks.extend(chunks)
+        except Exception:
+            pass  # file parsing errors are handled inside the job with better context
+
+    try:
+        if all_chunks:
+            validate_parents(all_chunks)
+    except IngestValidationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": exc.error.code,
+                "message": exc.error.message,
+                "detail": exc.error.detail,
+            },
+        )
+
+    # Create the job record in DB
+    job_id = await job_runner.create_job(
+        "ingest",
+        {"paths": [str(p) for p in file_paths], "directory": resolved_directory},
+    )
+
+    emit = ProgressEmitter(job_id=job_id)
+
+    # Schedule background task; hold strong reference to prevent premature GC
+    task = asyncio.create_task(
+        run_ingest_job(
+            job_id=job_id,
+            paths=[str(p) for p in file_paths],
+            directory=resolved_directory,
+            emit=emit,
+        )
+    )
+    _active_tasks.add(task)
+    task.add_done_callback(_active_tasks.discard)
+
+    logger.info("Enqueued ingest job %s (%d file paths)", job_id, len(file_paths))
+    return JSONResponse(
+        status_code=202,
+        content=JobEnqueueResponse(
+            job_id=job_id,
+            status="pending",
+            status_url=f"/api/v1/jobs/{job_id}",
+        ).model_dump(),
+    )

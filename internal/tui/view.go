@@ -49,15 +49,15 @@ func (m *Model) view(focused string) node.Node {
 	if highlighted, ok := renderCommandInput(m.chatInput.Value); ok {
 		inputLine = highlighted
 	} else if m.mode == modeSelectConfirm && m.chatInput.Value == "" {
-		inputLine = renderSelectConfirmInput("  ❯ ", m.selectAnimFrame, m.selectAnimDone)
+		inputLine = renderAnimatedInput("  ❯ ", "Press ENTER to proceed, or ESC to reselect...", m.selectAnimFrame, false)
 	} else if m.mode == modeQuery && m.chatInput.Value == "" {
-		inputLine = renderAnimatedInput("  ❯ ", "Type a query...", m.queryAnimFrame, m.animDone)
+		inputLine = renderAnimatedInput("  ❯ ", "Type a query...", m.queryAnimFrame, false)
 	} else if m.mode == modeAddonSelect && m.chatInput.Value == "" {
-		inputLine = renderAnimatedInput("  ❯ ", m.chatInput.Placeholder, m.addonSelectAnimFrame, m.animDone)
+		inputLine = renderAnimatedInput("  ❯ ", m.chatInput.Placeholder, m.addonSelectAnimFrame, false)
 	} else if m.mode == modeAddonDescribe && m.chatInput.Value == "" {
-		inputLine = renderAnimatedInput("  ❯ ", m.chatInput.Placeholder, m.addonDescribeAnimFrame, m.animDone)
+		inputLine = renderAnimatedInput("  ❯ ", m.chatInput.Placeholder, m.addonDescribeAnimFrame, false)
 	} else if m.mode == modeVarFill && m.chatInput.Value == "" {
-		inputLine = renderAnimatedInput("  ❯ ", m.chatInput.Placeholder, m.varFillAnimFrame, m.animDone)
+		inputLine = renderAnimatedInput("  ❯ ", m.chatInput.Placeholder, m.varFillAnimFrame, false)
 	} else {
 		inputLine = m.chatInput.Render("  ❯ ", colWhite, colorDefault, 0)
 	}
@@ -100,43 +100,6 @@ func (m *Model) statusRight() string {
 	return fmt.Sprintf("backend:%s │ k:%d │ model:%s ", backend, m.topK, m.currentModel)
 }
 
-// renderSelectConfirmInput renders the "Press ENTER..." placeholder with a
-// right-to-left brightness wave, then settles to default color once done.
-func renderSelectConfirmInput(prefix string, frame int, done bool) node.Node {
-	const placeholder = "Press ENTER to proceed, or ESC to reselect..."
-	prefixNode := node.TextStyled(prefix, colWhite, colorDefault, 0)
-	if done {
-		return node.Row(prefixNode, node.TextStyled(placeholder, colorDefault, colorDefault, 0))
-	}
-	runes := []rune(placeholder)
-	n := len(runes)
-	brightPos := n - 1 - frame
-	children := []node.Node{prefixNode}
-	for i, ch := range runes {
-		d := i - brightPos
-		if d < 0 {
-			d = -d
-		}
-		var col node.Color
-		switch {
-		case d == 0:
-			col = node.Color(255)
-		case d == 1:
-			col = node.Color(253)
-		case d == 2:
-			col = node.Color(249)
-		case d == 3:
-			col = node.Color(245)
-		case d <= 5:
-			col = node.Color(241)
-		default:
-			col = node.Color(238)
-		}
-		children = append(children, node.TextStyled(string(ch), col, colorDefault, 0))
-	}
-	return node.Row(children...)
-}
-
 // renderCommandInput colorizes a /command input line.
 // The command name (after /) is rendered in cyan; arguments in orange.
 // Returns (node, true) when text starts with '/', otherwise (zero, false).
@@ -159,15 +122,30 @@ func renderCommandInput(text string) (node.Node, bool) {
 	return node.Row(children...), true
 }
 
-// renderAnimatedInput renders a placeholder with left-to-right brightness wave animation.
+// renderAnimatedInput renders a placeholder with oscillating brightness wave animation.
+// The wave moves left-to-right then right-to-left (ping-pong pattern).
 func renderAnimatedInput(prefix, placeholder string, frame int, done bool) node.Node {
+	runes := []rune(placeholder)
+	n := len(runes)
+
+	// Calculate oscillating position: 0,1,2,...,n-1,n-2,...,1,0,1,2,...
+	var brightPos int
+	if n <= 1 {
+		brightPos = 0
+	} else {
+		cycleLen := 2 * (n - 1)
+		posInCycle := frame % cycleLen
+		if posInCycle < n {
+			brightPos = posInCycle
+		} else {
+			brightPos = cycleLen - posInCycle
+		}
+	}
+
 	prefixNode := node.TextStyled(prefix, colWhite, colorDefault, 0)
 	if done {
 		return node.Row(prefixNode, node.TextStyled(placeholder, colGray, colorDefault, 0))
 	}
-	runes := []rune(placeholder)
-	n := len(runes)
-	brightPos := frame % n
 	children := []node.Node{prefixNode}
 	for i, ch := range runes {
 		d := i - brightPos

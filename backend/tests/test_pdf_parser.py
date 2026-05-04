@@ -49,16 +49,13 @@ class TestExtractText:
         with pytest.raises(ValueError):
             extract_text(str(invalid_file))
 
-    def test_extract_text_requires_pypdf(self, monkeypatch):
-        """ImportError if pypdf is not available."""
-        import builtins
-        original_import = builtins.__import__
+    def test_extract_text_missing_file_raises(self):
+        """FileNotFoundError when the path does not exist.
 
-        def mock_import(name, *args, **kwargs):
-            if name == "pypdf":
-                raise ImportError("pypdf not installed")
-            return original_import(name, *args, **kwargs)
-
-        monkeypatch.setattr("builtins.__import__", mock_import)
-        with pytest.raises(ImportError, match="pypdf"):
-            extract_text("/some/file.pdf")
+        The parser now uses PyMuPDF (fitz) as the primary engine.  Both fitz
+        and the pypdf fallback check file existence before attempting to parse,
+        so a non-existent path always raises FileNotFoundError regardless of
+        which engine is active.
+        """
+        with pytest.raises(FileNotFoundError):
+            extract_text("/nonexistent/path/to/file.pdf")

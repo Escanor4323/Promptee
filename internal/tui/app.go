@@ -71,15 +71,17 @@ type Model struct {
 	thinking                 bool
 	lastSummary              *api.TelemetrySummaryResponse
 	selectAnimFrame          int
-	selectAnimDone           bool
 	queryAnimFrame           int
 	addonSelectAnimFrame     int
 	addonDescribeAnimFrame   int
 	varFillAnimFrame         int
-	animDone                 bool
+	animRunning              bool
 	justFoundResults         bool
 	lastFeedbackScore        int
 	awaitingFeedback         bool
+	activeJobID              string
+	polling                  bool
+	pollAttempts             int
 }
 
 // NewModel creates the initial application model.
@@ -122,6 +124,22 @@ func TooeyApp(apiURL string, topK int, tradeoffPreference string) *app.App {
 	}
 }
 
+// needsAnimation returns true if the current mode and state require animation
+// and animation is not already running.
+func (m *Model) needsAnimation() bool {
+	if m.animRunning {
+		return false
+	}
+	if m.chatInput.Value != "" {
+		return false
+	}
+	switch m.mode {
+	case modeQuery, modeSelectConfirm, modeAddonSelect, modeAddonDescribe, modeVarFill:
+		return true
+	}
+	return false
+}
+
 // update is the central message dispatcher for the tooey App.
 func (m *Model) update(msg app.Msg) app.UpdateResult {
 	if m.needsInitialHealthCheck {
@@ -133,6 +151,7 @@ func (m *Model) update(msg app.Msg) app.UpdateResult {
 					return doHealthCheckBg(m.client)
 				},
 				newTickCmd,
+				func() app.Msg { return newAnimTickCmd() },
 			},
 		}
 	}
@@ -167,6 +186,12 @@ func (m *Model) update(msg app.Msg) app.UpdateResult {
 
 	case ingestResultMsg:
 		return m.handleIngestResult(msg)
+
+	case ingestEnqueueResultMsg:
+		return m.handleIngestEnqueueResult(msg)
+
+	case jobProgressMsg:
+		return m.handleJobProgress(msg)
 
 	case addonRegisterResultMsg:
 		return m.handleAddonRegisterResult(msg)
@@ -272,86 +297,82 @@ func (m *Model) update(msg app.Msg) app.UpdateResult {
 		}
 		return app.NoCmd(m)
 
+	case templatesListResultMsg:
+		m.thinking = false
+		m.spinner.SetStatus(StatusComplete, "Listed")
+		if msg.err != nil {
+			m.convo.Add(ErrorSegment{Message: fmt.Sprintf("list failed: %s", msg.err.Error())})
+		} else {
+			m.convo.Add(TextSegment{Text: formatTemplateList(msg.items, msg.sortBy)})
+		}
+		return app.NoCmd(m)
+
 	case tickMsg:
 		if m.spinner.Kind != StatusIdle && m.spinner.Kind != StatusComplete {
 			m.spinner.Tick()
 		}
 		m.healthCheckCounter++
+
+		var cmds []app.Cmd
+		cmds = append(cmds, newTickCmd)
+
+		// Restart animation if we're in a mode that needs it but animation isn't running
+		if m.needsAnimation() {
+			cmds = append(cmds, func() app.Msg { return newAnimTickCmd() })
+		}
+
 		if m.healthCheckCounter >= 5 {
 			m.healthCheckCounter = 0
-			return app.UpdateResult{
-				Model: m,
-				Cmds: []app.Cmd{
-					func() app.Msg { return doHealthCheckBg(m.client) },
-					newTickCmd,
-				},
-			}
+			cmds = append(cmds, func() app.Msg { return doHealthCheckBg(m.client) })
 		}
-		return app.WithCmd(m, newTickCmd)
+
+		if m.polling && m.activeJobID != "" {
+			jobID := m.activeJobID
+			cmds = append(cmds, doPollJob(m.client, jobID))
+		}
+
+		return app.UpdateResult{Model: m, Cmds: cmds}
 
 	case animTickMsg:
-		const maxFrames = 50
 		shouldContinue := false
+		m.animRunning = true
 
 		switch m.mode {
 		case modeSelectConfirm:
-			if !m.selectAnimDone {
-				m.selectAnimFrame++
-				if m.selectAnimFrame >= maxFrames {
-					m.selectAnimDone = true
-				} else {
-					shouldContinue = true
-				}
-			}
+			// Continuous animation - frame counter increments indefinitely
+			// renderAnimatedInput calculates the oscillating position
+			m.selectAnimFrame++
+			shouldContinue = true
 		case modeQuery:
-			if !m.animDone && m.chatInput.Value == "" {
+			// Continuous animation while input is empty
+			if m.chatInput.Value == "" {
 				m.queryAnimFrame++
-				if m.queryAnimFrame < maxFrames {
-					shouldContinue = true
-				} else {
-					m.animDone = true
-					m.queryAnimFrame = 0
-					shouldContinue = true
-				}
+				shouldContinue = true
 			}
 		case modeAddonSelect:
-			if !m.animDone {
+			// Continuous animation while input is empty
+			if m.chatInput.Value == "" {
 				m.addonSelectAnimFrame++
-				if m.addonSelectAnimFrame < maxFrames {
-					shouldContinue = true
-				} else {
-					m.animDone = true
-					m.addonSelectAnimFrame = 0
-					shouldContinue = true
-				}
+				shouldContinue = true
 			}
 		case modeAddonDescribe:
-			if !m.animDone {
+			// Continuous animation while input is empty
+			if m.chatInput.Value == "" {
 				m.addonDescribeAnimFrame++
-				if m.addonDescribeAnimFrame < maxFrames {
-					shouldContinue = true
-				} else {
-					m.animDone = true
-					m.addonDescribeAnimFrame = 0
-					shouldContinue = true
-				}
+				shouldContinue = true
 			}
 		case modeVarFill:
-			if !m.animDone {
+			// Continuous animation while input is empty
+			if m.chatInput.Value == "" {
 				m.varFillAnimFrame++
-				if m.varFillAnimFrame < maxFrames {
-					shouldContinue = true
-				} else {
-					m.animDone = true
-					m.varFillAnimFrame = 0
-					shouldContinue = true
-				}
+				shouldContinue = true
 			}
 		}
 
 		if shouldContinue {
 			return app.WithCmd(m, func() app.Msg { return newAnimTickCmd() })
 		}
+		m.animRunning = false
 		return app.NoCmd(m)
 	}
 
@@ -421,13 +442,18 @@ func (m *Model) handleKey(key app.KeyMsg) app.UpdateResult {
 					m.enterVarFill(item)
 					return app.WithCmd(m, func() app.Msg { return newAnimTickCmd() })
 				}
-			}
-			return app.NoCmd(m)
-		}
-		if !m.thinking {
-			m.chatInput = m.chatInput.Update(key.Key)
 		}
 		return app.NoCmd(m)
+	}
+	if !m.thinking {
+		oldValue := m.chatInput.Value
+		m.chatInput = m.chatInput.Update(key.Key)
+		// If input became empty after having content, trigger animation
+		if oldValue != "" && m.chatInput.Value == "" && m.needsAnimation() {
+			return app.WithCmd(m, func() app.Msg { return newAnimTickCmd() })
+		}
+	}
+	return app.NoCmd(m)
 
 	case input.Paste:
 		if !m.thinking {
@@ -442,18 +468,26 @@ func (m *Model) handleKey(key app.KeyMsg) app.UpdateResult {
 		text, newInput := m.chatInput.Submit()
 		m.chatInput = newInput
 		text = strings.TrimSpace(text)
-		// modeSelectConfirm: empty Enter proceeds to next step
+		// modeSelectConfirm: empty Enter proceeds; slash commands escape to query mode
 		if m.mode == modeSelectConfirm {
-			m.proceedWithSelection()
-			return app.NoCmd(m)
+			if text != "" && strings.HasPrefix(text, "/") {
+				m.mode = modeQuery
+				return m.handleSubmit(text)
+			}
+		m.proceedWithSelection()
+		return app.WithCmd(m, func() app.Msg { return newAnimTickCmd() })
 		}
 		// modeAddonDescribe: Enter (including empty) triggers addon description flow
 		if m.mode == modeAddonDescribe {
 			return m.handleAddonDescribe(text)
 		}
-		// modeAddonSelect: empty Enter skips the addon
+		// modeAddonSelect: empty Enter skips the addon; slash commands escape to query mode
 		if text == "" && m.mode != modeAddonSelect {
 			return app.NoCmd(m)
+		}
+		if m.mode == modeAddonSelect && text != "" && strings.HasPrefix(text, "/") {
+			m.mode = modeQuery
+			return m.handleSubmit(text)
 		}
 		return m.handleSubmit(text)
 
@@ -565,6 +599,9 @@ func (m *Model) handleSubmit(text string) app.UpdateResult {
 					m.spinner.SetStatus(StatusToolCall, "health")
 				case "/feedback":
 					m.spinner.SetStatus(StatusToolCall, "feedback")
+				case "/list":
+					m.convo.Add(TextSegment{Text: d.msg})
+					m.spinner.SetStatus(StatusToolCall, "listing...")
 				}
 			}
 			return app.WithCmd(m, d.cmd)
@@ -572,12 +609,13 @@ func (m *Model) handleSubmit(text string) app.UpdateResult {
 
 	case modeSelectConfirm:
 		m.proceedWithSelection()
+		return app.WithCmd(m, func() app.Msg { return newAnimTickCmd() })
 
 	case modeAddonDescribe:
 		return m.handleAddonDescribe(text)
 
 	case modeAddonSelect:
-		m.handleAddonSelection(text)
+		return m.handleAddonSelection(text)
 
 	case modeVarFill:
 		m.handleVarFillInput(text)
@@ -629,8 +667,81 @@ func (m *Model) handleIngestResult(msg ingestResultMsg) app.UpdateResult {
 		m.convo.Add(ErrorSegment{Message: msg.err.Error()})
 		return app.NoCmd(m)
 	}
-	m.spinner.SetStatus(StatusComplete, fmt.Sprintf("Ingested %d chunks", msg.resp.Ingested))
-	m.convo.Add(TextSegment{Text: fmt.Sprintf("[ok] Ingested %d chunks", msg.resp.Ingested)})
+	return m.handleIngestEnqueueResult(ingestEnqueueResultMsg{
+		jobID: msg.resp.JobID,
+		err:   nil,
+	})
+}
+
+func (m *Model) handleIngestEnqueueResult(msg ingestEnqueueResultMsg) app.UpdateResult {
+	m.thinking = false
+	if msg.err != nil {
+		m.spinner.SetStatus(StatusError, msg.err.Error())
+		m.convo.Add(ErrorSegment{Message: msg.err.Error()})
+		return app.NoCmd(m)
+	}
+	m.activeJobID = msg.jobID
+	m.polling = true
+	m.pollAttempts = 0
+	m.convo.Add(IngestProgressSegment{
+		JobID:  msg.jobID,
+		Status: "pending",
+	})
+	m.spinner.SetStatus(StatusIngesting, "queued")
+	return app.NoCmd(m)
+}
+
+func (m *Model) handleJobProgress(msg jobProgressMsg) app.UpdateResult {
+	if msg.err != nil {
+		m.polling = false
+		m.activeJobID = ""
+		m.spinner.SetStatus(StatusError, msg.err.Error())
+		m.convo.Add(ErrorSegment{Message: fmt.Sprintf("job poll failed: %s", msg.err.Error())})
+		return app.NoCmd(m)
+	}
+	s := msg.status
+	m.pollAttempts++
+
+	seg := IngestProgressSegment{
+		JobID:          s.JobID,
+		Status:         s.Status,
+		ProgressPct:    s.ProgressPct,
+		CurrentStep:    s.CurrentStep,
+		CompletedSteps: s.CompletedSteps,
+		ETASeconds:     s.ETASeconds,
+		Error:          s.Error,
+	}
+	if s.TotalSteps != nil {
+		seg.TotalSteps = *s.TotalSteps
+	}
+	m.convo.ReplaceLastIngestProgress(seg)
+
+	switch s.Status {
+	case "completed":
+		m.polling = false
+		m.activeJobID = ""
+		count := 0
+		if s.Result != nil {
+			count = s.Result.Ingested
+		}
+		m.spinner.SetStatus(StatusComplete, fmt.Sprintf("%d docs ingested", count))
+	case "failed":
+		m.polling = false
+		m.activeJobID = ""
+		errMsg := "unknown error"
+		if s.Error != nil {
+			errMsg = *s.Error
+		}
+		m.spinner.SetStatus(StatusError, errMsg)
+		m.convo.Add(ErrorSegment{Message: fmt.Sprintf("ingest failed: %s", errMsg)})
+	default:
+		if m.pollAttempts >= 120 {
+			m.polling = false
+			m.activeJobID = ""
+			m.spinner.SetStatus(StatusError, "timed out")
+			m.convo.Add(ErrorSegment{Message: "ingest job timed out after 2 minutes"})
+		}
+	}
 	return app.NoCmd(m)
 }
 
@@ -652,7 +763,7 @@ func (m *Model) handleAddonDescribe(text string) app.UpdateResult {
 		m.lastAddonMode = ""
 		m.lastAddonName = ""
 		m.proceedToVariableFill()
-		return app.NoCmd(m)
+		return app.WithCmd(m, func() app.Msg { return newAnimTickCmd() })
 	}
 	m.convo.Add(UserMsgSegment{Text: text})
 	m.thinking = true
@@ -668,14 +779,14 @@ func (m *Model) handleAddonRecommendResult(msg addonRecommendResultMsg) app.Upda
 		m.spinner.SetStatus(StatusError, msg.err.Error())
 		m.convo.Add(ErrorSegment{Message: "Add-on search failed: " + msg.err.Error()})
 		m.proceedToVariableFill()
-		return app.NoCmd(m)
+		return app.WithCmd(m, func() app.Msg { return newAnimTickCmd() })
 	}
 	if len(msg.results) == 0 {
 		m.convo.Add(TextSegment{Text: "No matching add-ons found. Using base prompt."})
 		m.lastAddonMode = ""
 		m.lastAddonName = ""
 		m.proceedToVariableFill()
-		return app.NoCmd(m)
+		return app.WithCmd(m, func() app.Msg { return newAnimTickCmd() })
 	}
 
 	m.availableAddons = make([]api.AddOn, len(msg.results))
@@ -687,7 +798,6 @@ func (m *Model) handleAddonRecommendResult(msg addonRecommendResultMsg) app.Upda
 
 	m.mode = modeAddonSelect
 	m.addonSelectAnimFrame = 0
-	m.animDone = false
 	m.convo.Add(TextSegment{Text: fmt.Sprintf("Found %d matching add-ons — select one or ENTER to skip:", len(msg.results))})
 	for i, addon := range m.availableAddons {
 		m.convo.Add(AddOnPreviewSegment{
@@ -713,7 +823,6 @@ func (m *Model) enterVarFill(item RecommendItem) {
 	m.availableAddons = item.ApplicableAddons
 	m.lastTemplateID = item.TemplateID
 	m.selectAnimFrame = 0
-	m.selectAnimDone = false
 
 	m.convo.Add(SelectionSegment{
 		Title:     item.Title,
@@ -728,7 +837,6 @@ func (m *Model) enterVarFill(item RecommendItem) {
 func (m *Model) proceedWithSelection() {
 	m.mode = modeAddonDescribe
 	m.addonDescribeAnimFrame = 0
-	m.animDone = false
 	m.convo.Add(TextSegment{Text: "Describe the add-on you're looking for (or press ENTER to skip):"})
 	m.convo.Add(TextSegment{Text: "  e.g. \"I want speed and less verbosity avoiding token waste\""})
 	m.chatInput = component.NewTextInput("Describe desired add-on or press ENTER to skip...")
@@ -738,7 +846,6 @@ func (m *Model) proceedWithSelection() {
 func (m *Model) proceedToVariableFill() {
 	m.mode = modeVarFill
 	m.varFillAnimFrame = 0
-	m.animDone = false
 	if len(m.varsToFill) > 0 {
 		m.chatInput = component.NewTextInput("Enter value for [" + m.varsToFill[0] + "]")
 	} else {
@@ -746,20 +853,20 @@ func (m *Model) proceedToVariableFill() {
 	}
 }
 
-func (m *Model) handleAddonSelection(text string) {
+func (m *Model) handleAddonSelection(text string) app.UpdateResult {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		m.convo.Add(TextSegment{Text: "No add-on selected. Proceeding with base prompt."})
 		m.lastAddonMode = ""
 		m.lastAddonName = ""
 		m.proceedToVariableFill()
-		return
+		return app.WithCmd(m, func() app.Msg { return newAnimTickCmd() })
 	}
 
 	idx, err := strconv.Atoi(text)
 	if err != nil || idx < 1 || idx > len(m.availableAddons) {
 		m.convo.Add(ErrorSegment{Message: "Invalid selection. Enter a number or press ENTER to skip."})
-		return
+		return app.NoCmd(m)
 	}
 
 	selected := m.availableAddons[idx-1]
@@ -767,6 +874,7 @@ func (m *Model) handleAddonSelection(text string) {
 	m.lastAddonName = selected.Name
 	m.convo.Add(TextSegment{Text: fmt.Sprintf("[ok] Selected add-on: [%s] %s", selected.Mode, selected.Description)})
 	m.proceedToVariableFill()
+	return app.WithCmd(m, func() app.Msg { return newAnimTickCmd() })
 }
 
 func (m *Model) handleVarFillInput(value string) {
