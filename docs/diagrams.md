@@ -459,6 +459,267 @@ graph LR
 
 ---
 
+---
+
+## 10. Comprehensive Backend Architecture (APIs, Databases & Relations)
+
+Detailed view of all backend routers, services, databases, and their interactions.
+
+```mermaid
+graph TB
+    subgraph FastAPI["FastAPI Backend (Port 8000)"]
+        Health["🏥 Health Router<br/>GET /health<br/>System Status"]
+        Ingest["📥 Ingest Router<br/>POST /ingest<br/>Upload PDFs"]
+        Recommend["🎯 Recommend Router<br/>POST /recommend<br/>Query Templates"]
+        Templates["📋 Templates Router<br/>GET/POST /templates<br/>Manage Templates"]
+        Jobs["⚙️ Jobs Router<br/>GET /jobs/:id<br/>Track Async Jobs"]
+        AddOns["🔌 AddOns Router<br/>GET /addons<br/>Prompt Modifications"]
+        Models["🤖 Models Router<br/>GET/POST /models<br/>Model Config"]
+        Preferences["⚙️ Preferences Router<br/>GET/POST /preferences<br/>User Prefs"]
+        Telemetry["📊 Telemetry Router<br/>POST /feedback<br/>Metrics & Feedback"]
+    end
+
+    subgraph Services["Core Services"]
+        PDFParser["PDF Parser<br/>docling converter<br/>Extract text & metadata"]
+        Chunker["Document Chunker<br/>Split by prompts<br/>Semantic boundaries"]
+        ChildSplitter["Child Splitter<br/>Hierarchical chunks<br/>Parent-child links"]
+        IngestValidator["Ingest Validator<br/>Validate inputs<br/>Check duplicates"]
+        JobRunner["Job Runner<br/>Async execution<br/>Status tracking"]
+        PromptDetector["Prompt Detector<br/>Boundary detection<br/>Segment extraction"]
+        BM25Scorer["BM25 Scorer<br/>Lexical ranking<br/>Keyword search"]
+        Tokenizer["Tokenizer<br/>Token counting<br/>Cost estimation"]
+        RerankingEngine["Hybrid Reranker<br/>BM25 + semantic<br/>AddOn injection"]
+        MetricsService["Metrics Service<br/>Compute tradeoffs<br/>Speed/Cost/Quality"]
+    end
+
+    subgraph Databases["Data Layer"]
+        SQLite["<b>SQLite</b><br/><br/>📋 Templates<br/>├─ id, title, objective<br/>├─ full_text, hash<br/>├─ variables, addons<br/>└─ milvus_id (FK)<br/><br/>📊 Executions<br/>├─ id, template_id (FK)<br/>├─ query, latency<br/>└─ token_count<br/><br/>⭐ Feedback<br/>├─ id, execution_id (FK)<br/>├─ score, quality<br/>└─ timestamp<br/><br/>⚙️ Jobs<br/>├─ id, type, status<br/>├─ metadata, error<br/>└─ created_at<br/><br/>🤖 Models<br/>├─ id, name, type<br/>└─ config<br/><br/>💾 Preferences<br/>├─ user_id, model_id<br/>└─ tradeoff"]
+        
+        Milvus["<b>Milvus Vector DB</b><br/><br/>📚 Collections<br/>├─ Embeddings (1M+ vectors)<br/>├─ Metadata (template id)<br/>└─ Similarity Index"]
+    end
+
+    subgraph External["External Services"]
+        OpenAI["OpenAI API<br/>text-embedding-3-small<br/>LLM inference"]
+    end
+
+    %% Service to Service flows
+    Ingest -->|Parse PDF| PDFParser
+    PDFParser -->|Split text| Chunker
+    Chunker -->|Extract boundaries| PromptDetector
+    PromptDetector -->|Create chunks| ChildSplitter
+    ChildSplitter -->|Validate| IngestValidator
+    IngestValidator -->|Async job| JobRunner
+    
+    JobRunner -->|Extract embeddings| OpenAI
+    JobRunner -->|Store embeddings| Milvus
+    JobRunner -->|Store template| SQLite
+    
+    Recommend -->|Query job| Jobs
+    Recommend -->|Lookup templates| SQLite
+    Recommend -->|Vector search| Milvus
+    Recommend -->|Rank results| BM25Scorer
+    Recommend -->|Rerank| RerankingEngine
+    RerankingEngine -->|Apply addons| AddOns
+    RerankingEngine -->|Compute metrics| MetricsService
+    MetricsService -->|Log execution| Telemetry
+    
+    Telemetry -->|Store metrics| SQLite
+    
+    Health -->|Check status| SQLite
+    Health -->|Check status| Milvus
+    
+    Models -->|Manage| SQLite
+    Preferences -->|Store| SQLite
+    Templates -->|Query| SQLite
+    
+    Tokenizer -->|Count tokens| Chunker
+    Tokenizer -->|Estimate cost| MetricsService
+
+    style FastAPI fill:#4A90E2,color:#fff,stroke:#2E5C8A,stroke-width:3px
+    style Services fill:#50C878,color:#fff,stroke:#2D7A4A,stroke-width:2px
+    style Databases fill:#FF6B6B,color:#fff,stroke:#B83C3C,stroke-width:2px
+    style External fill:#FFA500,color:#fff,stroke:#B37A00,stroke-width:2px
+```
+
+---
+
+## 11. Frontend & API Integration Diagram
+
+Shows how the Go TUI communicates with the FastAPI backend through HTTP.
+
+```mermaid
+graph TB
+    subgraph TUI["Promptee TUI (Go)<br/>internal/tui/"]
+        Input["Input Handler<br/>Keyboard & Mouse<br/>Query typing"]
+        Prompt["Prompt Selector<br/>Browse templates<br/>Select with Enter"]
+        VarFill["Variable Filler<br/>Fill template vars<br/>Dynamic values"]
+        Executor["Executor<br/>Run prompt<br/>Stream output"]
+        Transcript["Transcript Viewer<br/>Display results<br/>Formatting"]
+        History["Chat History<br/>Store sessions<br/>Replay commands"]
+    end
+
+    subgraph APIClient["HTTP Client<br/>internal/api/"]
+        Health["CheckHealth()<br/>GET /api/v1/health"]
+        Recommend["Recommend()<br/>POST /api/v1/recommend"]
+        Ingest["Ingest()<br/>POST /api/v1/ingest"]
+        GetJob["GetJobStatus()<br/>GET /api/v1/jobs/:id"]
+        GetTemplates["GetTemplates()<br/>GET /api/v1/templates"]
+        GetAddOns["GetAddOns()<br/>GET /api/v1/addons"]
+    end
+
+    subgraph Backend["Backend APIs<br/>port 8000"]
+        HealthAPI["Health Router"]
+        RecommendAPI["Recommend Router"]
+        IngestAPI["Ingest Router"]
+        JobAPI["Jobs Router"]
+        TemplatesAPI["Templates Router"]
+        AddOnsAPI["AddOns Router"]
+    end
+
+    subgraph State["Application State"]
+        AppState["AppState<br/>├─ CurrentMode<br/>├─ SelectedTemplate<br/>├─ QueryHistory<br/>├─ JobID<br/>└─ LastResults"]
+    end
+
+    %% User Interactions
+    Input -->|Type query| Prompt
+    Prompt -->|Browse & select| VarFill
+    VarFill -->|Fill variables| Executor
+    Executor -->|Get recommendations| Recommend
+    Executor -->|Upload PDF| Ingest
+    Executor -->|Track async job| GetJob
+    
+    %% API Client HTTP calls
+    Recommend -->|Query backend<br/>HTTP POST| RecommendAPI
+    Ingest -->|Upload file<br/>HTTP POST| IngestAPI
+    GetJob -->|Poll status<br/>HTTP GET| JobAPI
+    GetTemplates -->|Fetch list<br/>HTTP GET| TemplatesAPI
+    GetAddOns -->|Get addons<br/>HTTP GET| AddOnsAPI
+    Health -->|Check alive<br/>HTTP GET| HealthAPI
+    
+    %% Results display
+    RecommendAPI -->|Results + scoring<br/>JSON response| Transcript
+    Transcript -->|Display formatted| Executor
+    Executor -->|Save to history| History
+    
+    %% State management
+    Input -->|Update state| AppState
+    Prompt -->|Update selection| AppState
+    Executor -->|Track job| AppState
+    History -->|Persist| AppState
+
+    style TUI fill:#667EEA,color:#fff,stroke:#4C47D1,stroke-width:3px
+    style APIClient fill:#8B5CF6,color:#fff,stroke:#6D28D9,stroke-width:2px
+    style Backend fill:#4A90E2,color:#fff,stroke:#2E5C8A,stroke-width:2px
+    style State fill:#F59E0B,color:#fff,stroke:#B45309,stroke-width:2px
+```
+
+---
+
+## 12. Complete End-to-End Workflow Sequence Diagram
+
+Shows the full interaction sequence from user starting app through getting recommendations.
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant TUI as Promptee TUI
+    participant APIClient as HTTP Client
+    participant Backend as FastAPI Backend
+    participant Jobs as Job Runner
+    participant Parser as PDF Parser
+    participant Chunker as Document Chunker
+    participant Milvus as Milvus Vector DB
+    participant SQLite as SQLite
+    participant OpenAI as OpenAI API
+
+    User->>TUI: 1. Start app
+    TUI->>APIClient: CheckHealth()
+    APIClient->>Backend: GET /api/v1/health
+    Backend->>Backend: Verify DBs
+    Backend-->>APIClient: 200 OK
+    APIClient-->>TUI: Connected
+
+    User->>TUI: 2. Upload PDF
+    TUI->>APIClient: Ingest(file)
+    APIClient->>Backend: POST /api/v1/ingest
+    Backend->>Jobs: Create async job_id
+    Backend-->>APIClient: {job_id}
+    APIClient-->>TUI: Job started
+
+    Jobs->>Parser: Parse PDF
+    Parser->>Parser: Extract text + metadata
+    Parser->>Chunker: Split by boundaries
+    Chunker->>Chunker: Extract prompts
+    Chunker->>SQLite: Store templates
+    SQLite-->>Chunker: template_ids
+
+    Chunker->>OpenAI: Generate embeddings
+    OpenAI-->>Chunker: Vector embeddings
+    Chunker->>Milvus: Store vectors
+    Milvus-->>Chunker: Confirmed
+    
+    Jobs->>SQLite: Mark job COMPLETED
+    
+    TUI->>APIClient: Poll GetJobStatus(job_id)
+    APIClient->>Backend: GET /api/v1/jobs/{job_id}
+    Backend->>SQLite: Fetch job status
+    SQLite-->>Backend: COMPLETED
+    Backend-->>APIClient: Status OK
+    APIClient-->>TUI: Job done!
+
+    User->>TUI: 3. Type query
+    TUI->>TUI: Display templates
+    User->>TUI: Select template
+    TUI->>TUI: Show variables
+    User->>TUI: Fill variables
+    
+    User->>TUI: 4. Execute prompt
+    TUI->>APIClient: Recommend(query, vars)
+    APIClient->>Backend: POST /api/v1/recommend
+    
+    Backend->>Milvus: Semantic search
+    Milvus-->>Backend: Top-k similar vectors
+    Backend->>SQLite: Fetch template data
+    SQLite-->>Backend: Templates + metadata
+    
+    Backend->>Backend: BM25 lexical ranking
+    Backend->>Backend: Rerank (hybrid)
+    Backend->>Backend: Inject addons
+    Backend->>Backend: Compute metrics
+    
+    Backend-->>APIClient: Results + scores
+    APIClient-->>TUI: Recommendations
+
+    TUI->>TUI: Format results
+    TUI->>Transcript: Display with syntax highlighting
+    Transcript-->>TUI: Rendered view
+    TUI-->>User: Show results
+
+    User->>TUI: 5. Provide feedback
+    TUI->>APIClient: SendFeedback(score)
+    APIClient->>Backend: POST /api/v1/feedback
+    Backend->>SQLite: Store feedback
+    SQLite-->>Backend: Confirmed
+    Backend-->>APIClient: 200 OK
+    APIClient-->>TUI: Saved
+
+    TUI->>History: Store session
+    History-->>TUI: Persisted
+
+    style User fill:#FFD700
+    style TUI fill:#667EEA,color:#fff
+    style APIClient fill:#8B5CF6,color:#fff
+    style Backend fill:#4A90E2,color:#fff
+    style Jobs fill:#50C878,color:#fff
+    style Parser fill:#50C878,color:#fff
+    style Chunker fill:#50C878,color:#fff
+    style Milvus fill:#FF6B6B,color:#fff
+    style SQLite fill:#FF6B6B,color:#fff
+    style OpenAI fill:#FFA500,color:#fff
+```
+
+---
+
 ## Notes
 
 - **Cross-Database Reference**: `Template.milvus_id` (SQLite) stores the Milvus vector ID for potential bidirectional lookups
@@ -466,3 +727,6 @@ graph LR
 - **Two-Phase Ingest**: SQLite Template row created first (gets PK), then Milvus insert (gets Milvus ID), then SQLite backfill of `milvus_id`
 - **Tradeoff Scoring**: User's `tradeoff_preference` (balanced/speed/cost/quality) adjusts alpha/beta/gamma weights in hybrid reranking
 - **PromptAddOns**: System-level templates that can be attached to results based on detected patterns or user preferences
+- **Job Queue**: Async PDF ingest uses job runner for long-running operations with status polling from TUI
+- **Hybrid Search**: Combines semantic similarity (Milvus) + BM25 lexical ranking + quality feedback scores
+- **Stateful TUI**: Application state tracks current mode, selected template, query history, and active job IDs
