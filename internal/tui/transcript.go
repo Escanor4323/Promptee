@@ -188,6 +188,62 @@ func (i RecommendItem) NodeRender() node.Node {
 	)
 }
 
+// AddonRecommendItem is one ranked add-on row (same selection UX as prompt recommendations).
+type AddonRecommendItem struct {
+	Index       int
+	Name        string
+	Mode        string
+	Description string
+	Suffix      string
+	Score       float64
+}
+
+func (i AddonRecommendItem) Render() string {
+	return fmt.Sprintf(" %d. [%.2f] [%s] %s — %s", i.Index, i.Score, i.Mode, i.Name, i.Description)
+}
+
+func (i AddonRecommendItem) NodeRender() node.Node {
+	scoreText := fmt.Sprintf("[%.2f]", i.Score)
+	return node.Row(
+		node.TextStyled(fmt.Sprintf(" %d. ", i.Index), colorPink, colorDefault, node.Bold),
+		node.TextStyled(scoreText, colorOrange, colorDefault, 0),
+		node.TextStyled(fmt.Sprintf(" [%s] ", i.Mode), colorCyan, colorDefault, 0),
+		node.Text(i.Name+" — "+i.Description),
+	)
+}
+
+// AddonRecommendSegment lists ranked add-ons for the current query (mirrors RecommendSegment).
+type AddonRecommendSegment struct {
+	Items []AddonRecommendItem
+	Query string
+}
+
+func (s AddonRecommendSegment) Render() string {
+	var b strings.Builder
+	b.WriteString(">>> Add-on matches (for your query):\n")
+	for i, item := range s.Items {
+		if i > 0 {
+			b.WriteString(" ─────────────────────────────────────────────────────────\n")
+		}
+		b.WriteString(item.Render())
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+func (s AddonRecommendSegment) NodeRender() node.Node {
+	children := []node.Node{
+		node.TextStyled(">>>  Add-on matches (for your query):", colorBlue, colorDefault, node.Bold),
+	}
+	for i, item := range s.Items {
+		if i > 0 {
+			children = append(children, node.TextStyled(" ─────────────────────────────────────────────────────────", colDimGray, colorDefault, 0))
+		}
+		children = append(children, item.NodeRender())
+	}
+	return node.Column(children...)
+}
+
 type ErrorSegment struct {
 	Message string
 }
@@ -204,8 +260,8 @@ func (s ErrorSegment) NodeRender() node.Node {
 }
 
 type SelectionSegment struct {
-	Title    string
-	Score    float64
+	Title     string
+	Score     float64
 	Objective string
 	Variables []string
 }
@@ -236,10 +292,10 @@ func (s SelectionSegment) NodeRender() node.Node {
 }
 
 type DashboardSegment struct {
-	TotalExecutions  int
-	AvgQualityScore  float64
-	ByCategory       map[string]int
-	Percentages      map[string]float64
+	TotalExecutions int
+	AvgQualityScore float64
+	ByCategory      map[string]int
+	Percentages     map[string]float64
 }
 
 func (s DashboardSegment) Render() string {
@@ -491,12 +547,6 @@ func (s ToolUseBlockSegment) Render() string {
 		prefix = "[!]"
 	}
 
-	inner := node.Column(
-		node.Text(call),
-		node.Text(result),
-	)
-	_ = inner
-
 	return prefix + " " + call + " → " + result
 }
 
@@ -525,13 +575,12 @@ func (s ToolUseBlockSegment) NodeRender() node.Node {
 	return node.Box(node.BorderRounded, node.Column(title, content))
 }
 
-
 // IngestProgressSegment represents an in-progress ingest job with real-time progress tracking.
 type IngestProgressSegment struct {
 	JobID          string
-	Status         string   // "pending", "processing", "completed", "failed"
-	ProgressPct    float64  // 0-100
-	CurrentStep    string   // e.g., "parsing_files", "chunking", "embedding"
+	Status         string  // "pending", "processing", "completed", "failed"
+	ProgressPct    float64 // 0-100
+	CurrentStep    string  // e.g., "parsing_files", "chunking", "embedding"
 	CompletedSteps int
 	TotalSteps     int
 	ETASeconds     *float64 // nil if not yet computed
@@ -716,7 +765,6 @@ func (t *Transcript) ReplaceLastToolUse(s ToolUseBlockSegment) bool {
 	return false
 }
 
-
 // ReplaceLastIngestProgress updates the last IngestProgressSegment in the transcript.
 // If the last segment is not an IngestProgressSegment, appends a new one.
 func (t *Transcript) ReplaceLastIngestProgress(seg IngestProgressSegment) {
@@ -732,9 +780,53 @@ func (t *Transcript) ReplaceLastIngestProgress(seg IngestProgressSegment) {
 // --- Markdown rendering (ported from maude reference design) ---
 
 func renderMarkdownLines(text string) []node.Node {
-	var nodes []node.Node
-	for _, line := range strings.Split(text, "\n") {
+	lines := strings.Split(text, "\n")
+	nodes := make([]node.Node, 0, len(lines))
+	inCodeFence := false
+	codeFenceLang := ""
+	codeLines := make([]string, 0, 16)
+
+	flushCodeBlock := func() {
+		if len(codeLines) == 0 {
+			inCodeFence = false
+			codeFenceLang = ""
+			return
+		}
+		header := "code"
+		if codeFenceLang != "" {
+			header = codeFenceLang
+		}
+		inner := make([]node.Node, 0, len(codeLines)+1)
+		inner = append(inner, node.TextStyled(" "+header, colGray, colorDefault, node.Bold))
+		for _, codeLine := range codeLines {
+			inner = append(inner, node.TextStyled(" "+codeLine, colWhite, colorCodeBG, 0))
+		}
+		nodes = append(nodes, node.Box(node.BorderRounded, node.Column(inner...)))
+		inCodeFence = false
+		codeFenceLang = ""
+		codeLines = codeLines[:0]
+	}
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") {
+			if inCodeFence {
+				flushCodeBlock()
+				continue
+			}
+			inCodeFence = true
+			codeFenceLang = strings.TrimSpace(strings.TrimPrefix(trimmed, "```"))
+			continue
+		}
+
+		if inCodeFence {
+			codeLines = append(codeLines, line)
+			continue
+		}
 		nodes = append(nodes, renderMarkdownLine(line))
+	}
+	if inCodeFence {
+		flushCodeBlock()
 	}
 	return nodes
 }
@@ -743,6 +835,25 @@ func renderMarkdownLine(line string) node.Node {
 	trimmed := strings.TrimLeft(line, " ")
 	indent := len(line) - len(trimmed)
 	pad := "  " + strings.Repeat(" ", indent)
+
+	if strings.HasPrefix(trimmed, "### ") {
+		return node.TextStyled(pad+strings.TrimPrefix(trimmed, "### "), colorCyan, colorDefault, node.Bold)
+	}
+	if strings.HasPrefix(trimmed, "## ") {
+		return node.TextStyled(pad+strings.TrimPrefix(trimmed, "## "), colorOrange, colorDefault, node.Bold)
+	}
+	if strings.HasPrefix(trimmed, "# ") {
+		return node.TextStyled(pad+strings.TrimPrefix(trimmed, "# "), colorBlue, colorDefault, node.Bold)
+	}
+	if strings.HasPrefix(trimmed, "> ") {
+		return node.Row(
+			node.TextStyled(pad+"│ ", colGray, colorDefault, 0),
+			node.TextStyled(strings.TrimPrefix(trimmed, "> "), colWhite, colorDefault, 0),
+		)
+	}
+	if trimmed == "---" || trimmed == "***" {
+		return node.TextStyled(strings.Repeat("─", 64), colDimGray, colorDefault, 0)
+	}
 
 	if strings.HasPrefix(trimmed, "- [x] ") || strings.HasPrefix(trimmed, "- [X] ") {
 		return node.Row(
@@ -802,6 +913,27 @@ func ResultsToItems(results []api.RecommendResult) []RecommendItem {
 			Variables:        r.Variables,
 			FullText:         r.FullText,
 			ApplicableAddons: r.ApplicableAddons,
+		}
+	}
+	return items
+}
+
+// AddonResultsToItems maps API add-on results to indexed transcript rows (max nine keys in the TUI).
+func AddonResultsToItems(results []api.AddonRecommendResult) []AddonRecommendItem {
+	n := len(results)
+	if n > 9 {
+		n = 9
+	}
+	items := make([]AddonRecommendItem, n)
+	for i := 0; i < n; i++ {
+		r := results[i]
+		items[i] = AddonRecommendItem{
+			Index:       i + 1,
+			Name:        r.Name,
+			Mode:        r.Mode,
+			Description: r.Description,
+			Suffix:      r.Suffix,
+			Score:       r.Score,
 		}
 	}
 	return items

@@ -54,8 +54,12 @@ func (m *Model) view(focused string) node.Node {
 		inputLine = renderAnimatedInput("  ❯ ", "Type a query...", m.queryAnimFrame, false)
 	} else if m.mode == modeAddonSelect && m.chatInput.Value == "" {
 		inputLine = renderAnimatedInput("  ❯ ", m.chatInput.Placeholder, m.addonSelectAnimFrame, false)
-	} else if m.mode == modeAddonDescribe && m.chatInput.Value == "" {
-		inputLine = renderAnimatedInput("  ❯ ", m.chatInput.Placeholder, m.addonDescribeAnimFrame, false)
+	} else if m.mode == modeAddonOrder && m.chatInput.Value == "" {
+		inputLine = renderAnimatedInput("  ❯ ", m.chatInput.Placeholder, m.addonOrderAnimFrame, false)
+	} else if m.mode == modeAddonPreview && m.chatInput.Value == "" {
+		inputLine = renderAnimatedInput("  ❯ ", m.chatInput.Placeholder, m.addonPreviewAnimFrame, false)
+	} else if m.mode == modeAddonQuery && m.chatInput.Value == "" {
+		inputLine = renderAnimatedInput("  ❯ ", m.chatInput.Placeholder, m.addonQueryAnimFrame, false)
 	} else if m.mode == modeVarFill && m.chatInput.Value == "" {
 		inputLine = renderAnimatedInput("  ❯ ", m.chatInput.Placeholder, m.varFillAnimFrame, false)
 	} else {
@@ -66,13 +70,17 @@ func (m *Model) view(focused string) node.Node {
 	bottomBorder := node.TextStyled(strings.Repeat("─", w), colDimGray, colorDefault, 0)
 
 	// Help bar with key hints and active mode tag.
-	helpText := "Ctrl+C:quit │ /help:commands │ 1-9:select │ mouse:scroll"
+	helpText := "Ctrl+C:quit │ /help:commands │ 1-9:pick prompt or add-on │ mouse:scroll"
 	if m.mode == modeVarFill {
 		helpText += " │ [var-fill]"
-	} else if m.mode == modeAddonDescribe {
-		helpText += " │ [addon-describe]"
+	} else if m.mode == modeAddonQuery {
+		helpText += " │ [addon-query]"
 	} else if m.mode == modeAddonSelect {
 		helpText += " │ [addon-select]"
+	} else if m.mode == modeAddonOrder {
+		helpText += " │ [addon-order]"
+	} else if m.mode == modeAddonPreview {
+		helpText += " │ [addon-preview]"
 	}
 	helpPad := w - len(helpText)
 	if helpPad < 0 {

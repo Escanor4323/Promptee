@@ -1,12 +1,13 @@
-"""POST /api/v1/recommend endpoint with hybrid reranking and AddOns.
+"""POST /api/v1/recommend endpoint with Milvus hybrid search and reranking.
 
-Embeds the query, searches Milvus for top-N semantic results, then
-reranks them using historical telemetry data from SQLite and applies
-PromptAddOn injection based on the user's tradeoff preference.
-Full text is fetched from SQLite (moved from Milvus for deduplication).
+Flow:
+  1. Embed query -> dense vector (sentence-transformers) + sparse vector (BM25).
+  2. Milvus hybrid_search fuses both streams via WeightedRanker (70 % dense, 30 % sparse).
+  3. Rerank top hits using historical telemetry (quality + popularity boosts).
+  4. Fetch full_text from SQLite, attach applicable PromptAddOns.
 
-BM25 hybrid scoring is applied client-side after fetching full_text,
-blending dense cosine similarity with keyword precision.
+BM25 is now executed fully on the Milvus side (SPARSE_FLOAT_VECTOR field +
+SPARSE_INVERTED_INDEX). Client-side BM25 post-processing has been removed.
 """
 
 import logging
@@ -14,7 +15,7 @@ import logging
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import select
 
-from app.db.milvus import search as milvus_search
+from app.db.milvus import hybrid_search as milvus_search
 from app.db.sqlite import async_session
 from app.models.templates import Template
 from app.schemas import (
@@ -24,7 +25,7 @@ from app.schemas import (
     RecommendResponse,
 )
 from app.services.addon import get_addons_for_preference
-from app.services.bm25_scorer import compute_bm25_scores
+from app.services.bm25_vectorizer import bm25_query_vector
 from app.services.embedder import embed
 from app.services.reranker import rerank
 
@@ -32,30 +33,34 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["recommend"])
 
-DENSE_WEIGHT = 0.7
-BM25_WEIGHT = 0.3
-
 
 @router.post("/recommend", response_model=RecommendResponse)
 async def recommend_prompts(request: RecommendRequest) -> RecommendResponse:
-    """Search for semantically similar prompt templates with hybrid reranking.
+    """Search for semantically similar prompt templates with Milvus hybrid search.
 
-    1. Embed query -> Milvus semantic search (top_k results)
+    1. Embed query (dense + BM25 sparse) -> Milvus hybrid_search
     2. Rerank using historical telemetry (quality + popularity boosts)
     3. Attach applicable PromptAddOns for the tradeoff preference
     """
     if not request.query or not request.query.strip():
         raise HTTPException(status_code=400, detail="Query string must not be empty")
 
+    query = request.query.strip()
+
     try:
-        query_vector = embed(request.query.strip())
+        query_dense = embed(query)
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=f"Query embedding failed: {exc}")
 
+    # Build the BM25 sparse query vector from the query text alone.
+    # We use the query as a single-element corpus so the vectorizer produces
+    # hash-keyed weights for all query terms.
+    query_sparse = bm25_query_vector(query, corpus=[query])
+
     try:
-        raw_results = milvus_search(query_vector, top_k=request.top_k)
+        raw_results = milvus_search(query_dense, query_sparse, top_k=request.top_k)
     except Exception as exc:
-        logger.error("Milvus search failed: %s", exc, exc_info=True)
+        logger.error("Milvus hybrid search failed: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail=f"Vector search failed: {exc}")
 
     if not raw_results:
@@ -81,8 +86,7 @@ async def recommend_prompts(request: RecommendRequest) -> RecommendResponse:
         for a in addons
     ]
 
-    # Fetch full_text for each reranked result
-    full_texts: list[str] = []
+    # Fetch full_text for each reranked result from SQLite
     enriched: list[tuple[dict, str]] = []
     async with async_session() as session:
         for r in reranked:
@@ -93,17 +97,7 @@ async def recommend_prompts(request: RecommendRequest) -> RecommendResponse:
                     select(Template.full_text).where(Template.id == template_id)
                 )
                 full_text = result.scalar_one_or_none() or ""
-            full_texts.append(full_text)
             enriched.append((r, full_text))
-
-    # Apply BM25 hybrid scoring: blend dense cosine score with keyword relevance
-    bm25_scores = compute_bm25_scores(request.query, full_texts)
-    for i, (r, _) in enumerate(enriched):
-        dense_score = r.get("hybrid_score", 0.0)
-        r["hybrid_score"] = DENSE_WEIGHT * dense_score + BM25_WEIGHT * bm25_scores[i]
-
-    # Re-sort by updated hybrid score descending
-    enriched.sort(key=lambda pair: pair[0].get("hybrid_score", 0.0), reverse=True)
 
     items: list[RecommendItem] = [
         RecommendItem(
@@ -121,7 +115,7 @@ async def recommend_prompts(request: RecommendRequest) -> RecommendResponse:
 
     logger.info(
         "Returning %d recommendations for query: %s (preference=%s)",
-        len(items), request.query[:80], request.tradeoff_preference,
+        len(items), query[:80], request.tradeoff_preference,
     )
 
     return RecommendResponse(results=items)

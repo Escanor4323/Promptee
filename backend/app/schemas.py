@@ -23,6 +23,10 @@ class IngestRequest(BaseModel):
     directory: str | None = None
 
 
+class IngestTextRequest(BaseModel):
+    text: str = Field(..., min_length=1)
+
+
 class IngestResponse(BaseModel):
     ingested: int
     titles: list[str]

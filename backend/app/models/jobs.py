@@ -9,7 +9,7 @@ from sqlalchemy import Column, DateTime, Float, Integer, String, func
 from app.db.sqlite import Base
 
 # Immutable enum value containers (follows coding-style.md immutability)
-JOB_KINDS: tuple[str, ...] = ("ingest", "docling_warmup")
+JOB_KINDS: tuple[str, ...] = ("ingest", "addon_ingest", "docling_warmup")
 JOB_STATUSES: tuple[str, ...] = ("pending", "processing", "completed", "failed", "cancelled")
 
 

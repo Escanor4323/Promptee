@@ -13,6 +13,7 @@ from app.db.milvus import get_or_create_collection
 from app.db.sqlite import init_db
 # Import all models to ensure tables are created during init_db()
 from app.models import Execution, Feedback, Job, Model, ModelPreference, Template  # noqa: F401
+from app.models.addon_templates import AddonTemplate  # noqa: F401
 from app.routers.addons import router as addons_router
 from app.routers.health import router as health_router
 from app.routers.ingest import router as ingest_router

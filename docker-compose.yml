@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   # PostgreSQL Relational Database (for templates, executions, feedback, metrics)
   postgres:
@@ -22,7 +20,7 @@ services:
 
   # etcd (Milvus dependency)
   etcd:
-    image: quay.io/coreos/etcd:v3.5.5
+    image: quay.io/coreos/etcd:v3.5.18
     environment:
       ETCD_AUTO_COMPACTION_MODE: revision
       ETCD_AUTO_COMPACTION_RETENTION: "1000"
@@ -42,25 +40,28 @@ services:
 
   # MinIO (Milvus dependency)
   minio:
-    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
+    image: minio/minio:RELEASE.2024-05-10T01-41-38Z
     environment:
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
     volumes:
       - minio_data:/minio_data
-    command: minio server /minio_data
+    command: minio server /minio_data --console-address ":9001"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 30s
-      timeout: 20s
-      retries: 3
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/9000' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     networks:
       - promptee_net
 
-  # Milvus Vector Database (for embeddings and semantic search)
+  # Milvus Standalone v2.6.15 — supports SPARSE_FLOAT_VECTOR + hybrid search
   milvus:
-    image: milvusdb/milvus:v2.3.3
+    image: milvusdb/milvus:v2.6.15
     command: ["milvus", "run", "standalone"]
+    security_opt:
+      - seccomp:unconfined
     environment:
       ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: minio:9000
@@ -79,6 +80,7 @@ services:
       interval: 30s
       timeout: 20s
       retries: 5
+      start_period: 30s
     networks:
       - promptee_net
 

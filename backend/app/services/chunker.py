@@ -68,6 +68,29 @@ def chunk_markdown(text: str) -> list[Chunk]:
     return chunks
 
 
+def chunk_text_auto(text: str) -> list[Chunk]:
+    """Chunk raw text content without requiring a file path."""
+    if not text or not text.strip():
+        return []
+
+    md_chunks = chunk_markdown(text)
+    if md_chunks:
+        return md_chunks
+
+    from app.services.prompt_detector import CascadingDetector
+    detector = CascadingDetector()
+    spans = detector.detect_prompts(text)
+    return [
+        Chunk(
+            title=span.title,
+            objective=span.objective or "",
+            full_text=span.content,
+            variables=_extract_variables(span.content),
+        )
+        for span in spans
+    ]
+
+
 def chunk_file(file_path: str) -> list[Chunk]:
     """Read a markdown file and return its chunks."""
     with open(file_path, encoding="utf-8") as f:
@@ -110,21 +133,6 @@ def chunk_file_auto(file_path: str) -> list[Chunk]:
     else:
         with open(file_path, encoding="utf-8") as f:
             text = f.read()
-
-    # #region agent log f0c062
-    import logging as _log, re as _re
-    _logger = _log.getLogger(__name__)
-    _all_obj = list(_re.finditer(r"objective", text, _re.IGNORECASE))
-    _line_start_obj = list(_re.finditer(r"^[ \t]*(?:\*\*)?objective\s*:", text, _re.IGNORECASE | _re.MULTILINE))
-    _logger.info("[f0c062] total 'objective' occurrences=%d, line-start matches=%d", len(_all_obj), len(_line_start_obj))
-    # Log first 500 chars around each non-line-start occurrence
-    _line_start_positions = {m.start() for m in _line_start_obj}
-    for _m in _all_obj[:25]:
-        if _m.start() not in _line_start_positions:
-            _ctx_start = max(0, _m.start() - 80)
-            _ctx_end = min(len(text), _m.end() + 80)
-            _logger.info("[f0c062] MISSED objective at pos %d ctx=%r", _m.start(), text[_ctx_start:_ctx_end])
-    # #endregion agent log f0c062
 
     from app.services.prompt_detector import CascadingDetector
     detector = CascadingDetector()

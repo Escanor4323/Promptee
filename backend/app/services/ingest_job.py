@@ -22,12 +22,14 @@ from typing import Optional
 
 from sqlalchemy import select
 
-from app.db.milvus import get_or_create_collection, insert_chunks
+from app.db.milvus import ADDON_COLLECTION_NAME, COLLECTION_NAME, get_or_create_collection, insert_chunks
 from app.db.sqlite import async_session
+from app.models.addon_templates import AddonTemplate
 from app.models.templates import Template
 from app.schemas import IngestResponse
+from app.services.bm25_vectorizer import bm25_sparse_vectors
 from app.services.child_splitter import ChildChunk, split_children
-from app.services.chunker import Chunk, chunk_file_auto
+from app.services.chunker import Chunk, chunk_file_auto, chunk_text_auto
 from app.services.embedder import embed_batch
 from app.services.ingest_validator import validate_parents, IngestValidationError, MAX_CHILDREN_PER_INGEST, MAX_TOKENS_PER_CHILD
 from app.services.job_runner import ProgressEmitter, mark_completed, mark_failed
@@ -45,12 +47,20 @@ _PIPELINE_STEPS = (
 )
 _TOTAL_STEPS = len(_PIPELINE_STEPS)
 
+INGEST_KIND_PROMPT = "prompt"
+INGEST_KIND_ADDON = "addon"
+_DB_TITLE_MAX = 256
+_DB_OBJECTIVE_MAX = 1024
+_DB_VARIABLES_MAX = 1024
+
 
 async def run_ingest_job(
     job_id: str,
     paths: list[str],
     directory: Optional[str],
     emit: ProgressEmitter,
+    ingest_kind: str = INGEST_KIND_PROMPT,
+    inline_texts: Optional[list[str]] = None,
 ) -> None:
     """Execute the full ingest pipeline as a background job.
 
@@ -64,7 +74,7 @@ async def run_ingest_job(
         emit: ProgressEmitter bound to this job_id.
     """
     try:
-        await _run_pipeline(job_id, paths, directory, emit)
+        await _run_pipeline(job_id, paths, directory, emit, ingest_kind, inline_texts=inline_texts)
         # Pipeline completed — discard pending progress so the flush() below
         # does not overwrite the "completed" status written by mark_completed().
         emit._pending_step = None
@@ -83,9 +93,12 @@ async def _run_pipeline(
     paths: list[str],
     directory: Optional[str],
     emit: ProgressEmitter,
+    ingest_kind: str,
+    inline_texts: Optional[list[str]] = None,
 ) -> None:
     """Inner pipeline — raises on error so the outer wrapper can catch cleanly."""
     step_idx = 0
+    model_cls, collection_name = _get_ingest_target(ingest_kind)
 
     # --- Step 1: resolving_paths ---
     await emit.emit("resolving_paths", step_idx, _TOTAL_STEPS)
@@ -106,7 +119,7 @@ async def _run_pipeline(
             unique_paths.append(fp)
     file_paths = unique_paths
 
-    if not file_paths:
+    if not file_paths and not (inline_texts and len(inline_texts) > 0):
         raise ValueError("No supported files found (.md, .pdf)")
 
     step_idx += 1
@@ -114,8 +127,13 @@ async def _run_pipeline(
     # --- Step 2: parsing_files (per-file progress) ---
     await emit.emit("parsing_files", step_idx, _TOTAL_STEPS)
     all_chunks: list[Chunk] = []
+    inline_count = len(inline_texts) if inline_texts else 0
+    total_sources = len(file_paths) + inline_count
+    if total_sources <= 0:
+        total_sources = 1
+
     for i, fp in enumerate(file_paths):
-        await emit.emit("parsing_files", i, len(file_paths))
+        await emit.emit("parsing_files", i, total_sources)
         try:
             # chunk_file_auto does synchronous file I/O + regex — run in thread
             # to avoid blocking the event loop during parsing.
@@ -125,10 +143,14 @@ async def _run_pipeline(
         except ValueError as exc:
             raise ValueError(f"Invalid file {fp}: {exc}") from exc
         logger.info("Extracted %d Parent chunks from %s", len(chunks), fp)
-        # #region agent log f0c062
-        logger.info("[f0c062] chunk_count=%d titles=%s", len(chunks), [c.title for c in chunks[:5]])
-        # #endregion agent log f0c062
         all_chunks.extend(chunks)
+
+    if inline_texts:
+        for text_idx, inline_text in enumerate(inline_texts):
+            await emit.emit("parsing_files", len(file_paths) + text_idx, total_sources)
+            chunks = await asyncio.to_thread(chunk_text_auto, inline_text)
+            logger.info("Extracted %d Parent chunks from inline text #%d", len(chunks), text_idx + 1)
+            all_chunks.extend(chunks)
 
     step_idx += 1
 
@@ -153,20 +175,23 @@ async def _run_pipeline(
     async with async_session() as session:
         for chunk in all_chunks:
             content_hash = hashlib.sha256(chunk.full_text.encode()).hexdigest()
-            result = await session.execute(
-                select(Template).where(Template.content_hash == content_hash)
-            )
+            result = await session.execute(select(model_cls).where(model_cls.content_hash == content_hash))
             existing = result.scalar_one_or_none()
             if existing is not None:
                 logger.info("Skipping duplicate (hash=%s, title=%s)", content_hash, chunk.title)
                 template_ids.append(existing.id)
                 continue
 
-            template = Template(
-                milvus_id=None,
+            db_title, db_objective, db_variables = _normalize_chunk_metadata(
                 title=chunk.title,
                 objective=chunk.objective,
-                variables=json.dumps(chunk.variables),
+                variables=chunk.variables,
+            )
+            template = model_cls(
+                milvus_id=None,
+                title=db_title,
+                objective=db_objective,
+                variables=db_variables,
                 full_text=chunk.full_text,
                 content_hash=content_hash,
             )
@@ -230,6 +255,10 @@ async def _run_pipeline(
     except RuntimeError as exc:
         raise RuntimeError(f"Embedding generation failed: {exc}") from exc
 
+    # Compute BM25 sparse vectors for the same child corpus.
+    # bm25_sparse_vectors is CPU-bound (rank_bm25) — run in thread.
+    sparse_vecs: list[dict] = await asyncio.to_thread(bm25_sparse_vectors, child_texts)
+
     step_idx += 1
 
     # --- Step 6: indexing (Milvus) ---
@@ -237,22 +266,24 @@ async def _run_pipeline(
     try:
         # Both Milvus calls use a synchronous SDK — offload to thread to avoid
         # blocking the event loop during network I/O with the Milvus server.
-        await asyncio.to_thread(get_or_create_collection)
+        await asyncio.to_thread(get_or_create_collection, collection_name)
         await asyncio.to_thread(
             insert_chunks,
             child_texts=child_texts,
             embeddings=embeddings,
+            sparse_vectors=sparse_vecs,
             template_ids=child_template_ids,
             chunk_indices=chunk_indices,
             token_counts=token_counts,
             parent_titles=parent_titles,
+            collection_name=collection_name,
         )
     except Exception as exc:
         logger.error(
             "Milvus insertion failed, rolling back %d templates: %s",
             len(created_template_ids), exc,
         )
-        await _rollback_templates(created_template_ids)
+        await _rollback_templates(created_template_ids, model_cls)
         raise RuntimeError(f"Milvus insertion failed: {exc}") from exc
 
     titles = [c.title for c in all_chunks]
@@ -263,7 +294,13 @@ async def _run_pipeline(
     )
 
 
-async def _rollback_templates(template_ids: list[int]) -> None:
+def _get_ingest_target(ingest_kind: str):
+    if ingest_kind == INGEST_KIND_ADDON:
+        return AddonTemplate, ADDON_COLLECTION_NAME
+    return Template, COLLECTION_NAME
+
+
+async def _rollback_templates(template_ids: list[int], model_cls) -> None:
     """Delete SQLite Template rows created in this job on Milvus failure.
 
     Args:
@@ -274,10 +311,38 @@ async def _rollback_templates(template_ids: list[int]) -> None:
     try:
         async with async_session() as session:
             for t_id in template_ids:
-                result = await session.execute(select(Template).where(Template.id == t_id))
+                result = await session.execute(select(model_cls).where(model_cls.id == t_id))
                 template = result.scalar_one_or_none()
                 if template is not None:
                     await session.delete(template)
         logger.info("Rolled back %d Template rows after Milvus failure", len(template_ids))
     except Exception as exc:
         logger.error("Rollback failed for template_ids=%s: %s", template_ids, exc)
+
+
+def _normalize_chunk_metadata(title: str, objective: str, variables: list[str]) -> tuple[str, str, str]:
+    """Clamp metadata fields to DB column limits before insert."""
+    normalized_title = (title or "").strip()
+    if len(normalized_title) > _DB_TITLE_MAX:
+        logger.warning("Truncating title from %d to %d chars for DB insert", len(normalized_title), _DB_TITLE_MAX)
+        normalized_title = normalized_title[:_DB_TITLE_MAX]
+
+    normalized_objective = (objective or "").strip()
+    if len(normalized_objective) > _DB_OBJECTIVE_MAX:
+        logger.warning(
+            "Truncating objective from %d to %d chars for DB insert",
+            len(normalized_objective),
+            _DB_OBJECTIVE_MAX,
+        )
+        normalized_objective = normalized_objective[:_DB_OBJECTIVE_MAX]
+
+    variables_json = json.dumps(variables or [])
+    if len(variables_json) > _DB_VARIABLES_MAX:
+        logger.warning(
+            "Truncating variables payload from %d to %d chars for DB insert",
+            len(variables_json),
+            _DB_VARIABLES_MAX,
+        )
+        variables_json = variables_json[:_DB_VARIABLES_MAX]
+
+    return normalized_title, normalized_objective, variables_json

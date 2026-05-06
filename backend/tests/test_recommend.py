@@ -7,7 +7,7 @@ rejected, and that reranker failures fall back gracefully.
 
 import hashlib
 import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import numpy as np
 import pytest
@@ -104,6 +104,7 @@ async def test_recommend_returns_full_parent_text(rec_client: AsyncClient):
 
     with (
         patch("app.routers.recommend.embed", return_value=_DUMMY_VECTOR),
+        patch("app.routers.recommend.bm25_query_vector", return_value={}),
         patch(
             "app.routers.recommend.milvus_search",
             return_value=[_milvus_hit(tmpl_id)],
@@ -130,6 +131,7 @@ async def test_recommend_empty_milvus_returns_empty_list(rec_client: AsyncClient
     """When Milvus returns no hits the response is {'results': []}."""
     with (
         patch("app.routers.recommend.embed", return_value=_DUMMY_VECTOR),
+        patch("app.routers.recommend.bm25_query_vector", return_value={}),
         patch("app.routers.recommend.milvus_search", return_value=[]),
     ):
         resp = await rec_client.post(
@@ -166,6 +168,7 @@ async def test_recommend_reranker_failure_falls_back_gracefully(rec_client: Asyn
 
     with (
         patch("app.routers.recommend.embed", return_value=_DUMMY_VECTOR),
+        patch("app.routers.recommend.bm25_query_vector", return_value={}),
         patch("app.routers.recommend.milvus_search", return_value=[hit]),
         patch(
             "app.routers.recommend.rerank",
@@ -198,6 +201,7 @@ async def test_recommend_template_id_zero_returns_empty_full_text(rec_client: As
 
     with (
         patch("app.routers.recommend.embed", return_value=_DUMMY_VECTOR),
+        patch("app.routers.recommend.bm25_query_vector", return_value={}),
         patch("app.routers.recommend.milvus_search", return_value=[sentinel_hit]),
         patch(
             "app.routers.recommend.rerank",

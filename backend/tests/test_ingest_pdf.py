@@ -19,6 +19,7 @@ from sqlalchemy.orm import sessionmaker
 import app.db.sqlite as sqlite_module
 from app.db.sqlite import Base
 from app.main import create_app
+from app.models.addon_templates import AddonTemplate
 from app.models.templates import Template
 from app.services.path_resolver import PathResolution, get_path_resolver
 
@@ -237,3 +238,83 @@ async def test_ingest_duplicate_skipped(ingest_client: AsyncClient, tmp_path: Pa
         )
     # No new rows — content_hash deduplication keeps the count at 2
     assert count_after_second == 2
+
+
+@pytest.mark.asyncio
+async def test_ingest_addon_creates_addon_templates(ingest_client: AsyncClient, tmp_path: Path):
+    """Addon ingest route persists chunks into addon_templates table."""
+    md_file = tmp_path / "addon_prompts.md"
+    _make_md(md_file, n_prompts=2)
+
+    with (
+        patch(
+            "app.services.ingest_job.embed_batch",
+            side_effect=lambda texts: np.zeros((len(texts), 384)),
+        ),
+        patch("app.services.ingest_job.get_or_create_collection", return_value=MagicMock()),
+        patch("app.services.ingest_job.insert_chunks", return_value=None),
+    ):
+        resp = await ingest_client.post(
+            "/api/v1/addons/ingest", json={"paths": [str(md_file)]}
+        )
+        assert resp.status_code == 202
+        job_id = resp.json()["job_id"]
+        job_data = await _poll_job(ingest_client, job_id)
+
+    assert job_data["status"] == "completed", f"Job failed: {job_data.get('error')}"
+
+    async with TestSessionLocal() as session:
+        template_count = await session.scalar(select(func.count()).select_from(Template))
+        addon_count = await session.scalar(select(func.count()).select_from(AddonTemplate))
+    assert template_count == 0
+    assert addon_count == 2
+
+
+@pytest.mark.asyncio
+async def test_ingest_text_creates_templates(ingest_client: AsyncClient):
+    text = (
+        "### 1. Text Prompt\n\n"
+        "**Objective:** Validate text ingestion.\n\n"
+        "Body with [ROLE].\n"
+    )
+    with (
+        patch(
+            "app.services.ingest_job.embed_batch",
+            side_effect=lambda texts: np.zeros((len(texts), 384)),
+        ),
+        patch("app.services.ingest_job.get_or_create_collection", return_value=MagicMock()),
+        patch("app.services.ingest_job.insert_chunks", return_value=None),
+    ):
+        resp = await ingest_client.post("/api/v1/ingest/text", json={"text": text})
+        assert resp.status_code == 202
+        job_id = resp.json()["job_id"]
+        job_data = await _poll_job(ingest_client, job_id)
+    assert job_data["status"] == "completed", f"Job failed: {job_data.get('error')}"
+    async with TestSessionLocal() as session:
+        count = await session.scalar(select(func.count()).select_from(Template))
+    assert count == 1
+
+
+@pytest.mark.asyncio
+async def test_ingest_addon_text_creates_addon_templates(ingest_client: AsyncClient):
+    text = (
+        "### 1. Addon Prompt\n\n"
+        "**Objective:** Validate addon text ingestion.\n\n"
+        "Body with [ROLE].\n"
+    )
+    with (
+        patch(
+            "app.services.ingest_job.embed_batch",
+            side_effect=lambda texts: np.zeros((len(texts), 384)),
+        ),
+        patch("app.services.ingest_job.get_or_create_collection", return_value=MagicMock()),
+        patch("app.services.ingest_job.insert_chunks", return_value=None),
+    ):
+        resp = await ingest_client.post("/api/v1/addons/ingest/text", json={"text": text})
+        assert resp.status_code == 202
+        job_id = resp.json()["job_id"]
+        job_data = await _poll_job(ingest_client, job_id)
+    assert job_data["status"] == "completed", f"Job failed: {job_data.get('error')}"
+    async with TestSessionLocal() as session:
+        count = await session.scalar(select(func.count()).select_from(AddonTemplate))
+    assert count == 1

@@ -144,6 +144,108 @@ func TestIngest_ServerError(t *testing.T) {
 	}
 }
 
+func TestIngestAddon_Returns202AndJobID(t *testing.T) {
+	expected := JobEnqueueResponse{
+		JobID:     "addon-123",
+		Status:    "pending",
+		StatusURL: "/api/v1/jobs/addon-123",
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("expected POST, got %s", r.Method)
+		}
+		if r.URL.Path != "/api/v1/addons/ingest" {
+			t.Errorf("expected path /api/v1/addons/ingest, got %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		json.NewEncoder(w).Encode(expected)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	resp, err := c.IngestAddon(context.Background(), IngestRequest{
+		Paths: []string{"addons/a.md"},
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if resp.JobID != "addon-123" {
+		t.Errorf("expected JobID 'addon-123', got %q", resp.JobID)
+	}
+}
+
+func TestIngestAddon_ServerError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	_, err := c.IngestAddon(context.Background(), IngestRequest{Paths: []string{"a.md"}})
+	if err == nil {
+		t.Fatal("expected error for 500 response")
+	}
+}
+
+func TestIngestText_Returns202AndJobID(t *testing.T) {
+	expected := JobEnqueueResponse{
+		JobID:     "text-123",
+		Status:    "pending",
+		StatusURL: "/api/v1/jobs/text-123",
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("expected POST, got %s", r.Method)
+		}
+		if r.URL.Path != "/api/v1/ingest/text" {
+			t.Errorf("expected path /api/v1/ingest/text, got %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		json.NewEncoder(w).Encode(expected)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	resp, err := c.IngestText(context.Background(), IngestTextRequest{Text: "hello"})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if resp.JobID != "text-123" {
+		t.Errorf("expected JobID 'text-123', got %q", resp.JobID)
+	}
+}
+
+func TestIngestAddonText_Returns202AndJobID(t *testing.T) {
+	expected := JobEnqueueResponse{
+		JobID:     "addon-text-123",
+		Status:    "pending",
+		StatusURL: "/api/v1/jobs/addon-text-123",
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("expected POST, got %s", r.Method)
+		}
+		if r.URL.Path != "/api/v1/addons/ingest/text" {
+			t.Errorf("expected path /api/v1/addons/ingest/text, got %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		json.NewEncoder(w).Encode(expected)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	resp, err := c.IngestAddonText(context.Background(), IngestTextRequest{Text: "addon"})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if resp.JobID != "addon-text-123" {
+		t.Errorf("expected JobID 'addon-text-123', got %q", resp.JobID)
+	}
+}
+
 // TestGetJobStatus runs table-driven cases covering all job lifecycle states.
 func TestGetJobStatus(t *testing.T) {
 	totalSteps := 10

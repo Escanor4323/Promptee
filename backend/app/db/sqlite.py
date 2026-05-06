@@ -140,7 +140,7 @@ async def init_db() -> None:
 
 # All tables that must exist for the application to function correctly.
 REQUIRED_TABLES: frozenset[str] = frozenset(
-    {"jobs", "templates", "executions", "feedback", "models", "model_preferences"}
+    {"jobs", "templates", "addon_templates", "executions", "feedback", "models", "model_preferences"}
 )
 
 

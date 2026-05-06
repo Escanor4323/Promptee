@@ -186,6 +186,11 @@ type IngestRequest struct {
 	Directory string   `json:"directory,omitempty"`
 }
 
+// IngestTextRequest is the body for POST /api/v1/ingest/text.
+type IngestTextRequest struct {
+	Text string `json:"text"`
+}
+
 // IngestResponse is the completed ingest result, returned inside JobStatusResponse.Result
 // when a job reaches the "completed" state.
 type IngestResponse struct {
@@ -209,10 +214,10 @@ type JobStatusResponse struct {
 	ProgressPct    float64         `json:"progress_pct"`
 	CurrentStep    string          `json:"current_step"`
 	CompletedSteps int             `json:"completed_steps"`
-	TotalSteps     *int            `json:"total_steps"`  // nullable
-	ETASeconds     *float64        `json:"eta_seconds"`  // nullable
-	Error          *string         `json:"error"`        // nullable
-	Result         *IngestResponse `json:"result"`       // nullable, populated on completion
+	TotalSteps     *int            `json:"total_steps"` // nullable
+	ETASeconds     *float64        `json:"eta_seconds"` // nullable
+	Error          *string         `json:"error"`       // nullable
+	Result         *IngestResponse `json:"result"`      // nullable, populated on completion
 }
 
 // Ingest calls POST /api/v1/ingest and returns a job enqueue response (202 Accepted).
@@ -238,6 +243,87 @@ func (c *Client) Ingest(ctx context.Context, req IngestRequest) (*JobEnqueueResp
 	var result JobEnqueueResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("decode ingest response: %w", err)
+	}
+	return &result, nil
+}
+
+// IngestText calls POST /api/v1/ingest/text and returns a job enqueue response (202 Accepted).
+func (c *Client) IngestText(ctx context.Context, req IngestTextRequest) (*JobEnqueueResponse, error) {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("marshal ingest text request: %w", err)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/api/v1/ingest/text", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("create ingest text request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	resp, err := c.HTTPClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("ingest text request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("ingest text returned status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+	var result JobEnqueueResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode ingest text response: %w", err)
+	}
+	return &result, nil
+}
+
+// IngestAddon calls POST /api/v1/addons/ingest and returns a job enqueue response (202 Accepted).
+func (c *Client) IngestAddon(ctx context.Context, req IngestRequest) (*JobEnqueueResponse, error) {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("marshal addon ingest request: %w", err)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/api/v1/addons/ingest", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("create addon ingest request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	resp, err := c.HTTPClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("addon ingest request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("addon ingest returned status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+	var result JobEnqueueResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode addon ingest response: %w", err)
+	}
+	return &result, nil
+}
+
+// IngestAddonText calls POST /api/v1/addons/ingest/text and returns a job enqueue response (202 Accepted).
+func (c *Client) IngestAddonText(ctx context.Context, req IngestTextRequest) (*JobEnqueueResponse, error) {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("marshal addon ingest text request: %w", err)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/api/v1/addons/ingest/text", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("create addon ingest text request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	resp, err := c.HTTPClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("addon ingest text request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("addon ingest text returned status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+	var result JobEnqueueResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode addon ingest text response: %w", err)
 	}
 	return &result, nil
 }
@@ -472,8 +558,9 @@ func (c *Client) ListTemplates(ctx context.Context, sortBy, order string) ([]Tem
 
 // AddonRecommendRequest is the body for POST /api/v1/addons/recommend.
 type AddonRecommendRequest struct {
-	Query string `json:"query"`
-	TopK  int    `json:"top_k"`
+	Query              string `json:"query"`
+	TopK               int    `json:"top_k"`
+	TradeoffPreference string `json:"tradeoff_preference,omitempty"`
 }
 
 // AddonRecommendResult is a single ranked add-on result.

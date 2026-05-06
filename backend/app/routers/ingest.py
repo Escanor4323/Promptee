@@ -12,8 +12,8 @@ from typing import Callable
 from fastapi import APIRouter, Depends, HTTPException
 from starlette.responses import JSONResponse
 
-from app.schemas import IngestRequest, JobEnqueueResponse
-from app.services.chunker import chunk_file_auto
+from app.schemas import IngestRequest, IngestTextRequest, JobEnqueueResponse
+from app.services.chunker import chunk_file_auto, chunk_text_auto
 from app.services.ingest_validator import IngestValidationError, validate_parents
 from app.services.path_resolver import get_path_resolver, PathResolutionError
 import app.services.job_runner as job_runner
@@ -109,7 +109,15 @@ async def ingest_documents(
         pre_validate_paths.extend(sorted(dir_path.glob("*.md")))
         pre_validate_paths.extend(sorted(dir_path.glob("*.pdf")))
 
-    for fp in pre_validate_paths:
+    deduped_pre_validate_paths: list[Path] = []
+    seen_prevalidate: set[Path] = set()
+    for path in pre_validate_paths:
+        resolved = path.resolve()
+        if resolved not in seen_prevalidate:
+            seen_prevalidate.add(resolved)
+            deduped_pre_validate_paths.append(path)
+
+    for fp in deduped_pre_validate_paths:
         try:
             chunks = await asyncio.to_thread(chunk_file_auto, str(fp))
             all_chunks.extend(chunks)
@@ -150,6 +158,47 @@ async def ingest_documents(
     task.add_done_callback(_active_tasks.discard)
 
     logger.info("Enqueued ingest job %s (%d file paths)", job_id, len(file_paths))
+    return JSONResponse(
+        status_code=202,
+        content=JobEnqueueResponse(
+            job_id=job_id,
+            status="pending",
+            status_url=f"/api/v1/jobs/{job_id}",
+        ).model_dump(),
+    )
+
+
+@router.post("/ingest/text", response_model=JobEnqueueResponse, status_code=202)
+async def ingest_text(request: IngestTextRequest) -> JSONResponse:
+    chunks = await asyncio.to_thread(chunk_text_auto, request.text)
+    try:
+        if chunks:
+            validate_parents(chunks)
+    except IngestValidationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": exc.error.code,
+                "message": exc.error.message,
+                "detail": exc.error.detail,
+            },
+        )
+
+    job_id = await job_runner.create_job("ingest", {"inline_text_count": 1})
+    emit = ProgressEmitter(job_id=job_id)
+    task = asyncio.create_task(
+        run_ingest_job(
+            job_id=job_id,
+            paths=[],
+            directory=None,
+            emit=emit,
+            inline_texts=[request.text],
+        )
+    )
+    _active_tasks.add(task)
+    task.add_done_callback(_active_tasks.discard)
+
+    logger.info("Enqueued ingest text job %s", job_id)
     return JSONResponse(
         status_code=202,
         content=JobEnqueueResponse(

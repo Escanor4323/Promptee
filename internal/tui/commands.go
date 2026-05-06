@@ -28,11 +28,6 @@ type recommendResultMsg struct {
 	err  error
 }
 
-type ingestResultMsg struct {
-	resp *api.JobEnqueueResponse
-	err  error
-}
-
 // jobProgressMsg carries a job status poll result.
 type jobProgressMsg struct {
 	status *api.JobStatusResponse
@@ -62,11 +57,6 @@ type feedbackResultMsg struct {
 
 type simulateResponseMsg struct {
 	query string
-}
-
-type addonRegisterResultMsg struct {
-	addon *api.RegisterAddonResponse
-	err   error
 }
 
 type addonRecommendResultMsg struct {
@@ -150,6 +140,19 @@ func doBatchIngest(client *api.Client, paths []string) app.Cmd {
 	}
 }
 
+// doIngestText enqueues a text-based ingest job.
+func doIngestText(client *api.Client, text string) app.Cmd {
+	return func() app.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		resp, err := client.IngestText(ctx, api.IngestTextRequest{Text: text})
+		if err != nil {
+			return ingestEnqueueResultMsg{err: err}
+		}
+		return ingestEnqueueResultMsg{jobID: resp.JobID}
+	}
+}
+
 // doPollJob polls the backend for job status once, returning a jobProgressMsg.
 // The update handler re-fires this command if the job is still in-progress.
 func doPollJob(client *api.Client, jobID string) app.Cmd {
@@ -163,7 +166,6 @@ func doPollJob(client *api.Client, jobID string) app.Cmd {
 		return jobProgressMsg{status: status}
 	}
 }
-
 
 func doHealthCheck(client *api.Client) app.Msg {
 	return healthResultMsg{err: client.CheckHealth(), explicit: true}
@@ -197,26 +199,43 @@ func doSubmitFeedback(client *api.Client, executionID int, qualityScore int, not
 	return feedbackResultMsg{err: err, score: qualityScore}
 }
 
-func doRegisterAddon(client *api.Client, mode, name, filePath string) app.Msg {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+func doRegisterAddon(client *api.Client, _, _, filePath string) app.Msg {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	content, err := os.ReadFile(filePath)
-	if err != nil {
-		return addonRegisterResultMsg{err: fmt.Errorf("read file %s: %w", filePath, err)}
+	req := api.IngestRequest{}
+	if strings.HasSuffix(filePath, "/") || strings.HasSuffix(filePath, "\\") {
+		req.Directory = strings.TrimRight(filePath, "/\\")
+	} else {
+		req.Paths = []string{filePath}
 	}
-	resp, err := client.RegisterAddon(ctx, api.RegisterAddonRequest{
-		Name:        name,
-		Mode:        mode,
-		Suffix:      string(content),
-		Description: fmt.Sprintf("Custom add-on: %s", name),
-	})
-	return addonRegisterResultMsg{addon: resp, err: err}
+	resp, err := client.IngestAddon(ctx, req)
+	if err != nil {
+		return ingestEnqueueResultMsg{err: err}
+	}
+	return ingestEnqueueResultMsg{jobID: resp.JobID}
 }
 
-func doRecommendAddons(client *api.Client, query string) app.Msg {
+func doRegisterAddonText(client *api.Client, text string) app.Msg {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	resp, err := client.IngestAddonText(ctx, api.IngestTextRequest{Text: text})
+	if err != nil {
+		return ingestEnqueueResultMsg{err: err}
+	}
+	return ingestEnqueueResultMsg{jobID: resp.JobID}
+}
+
+func doRecommendAddons(client *api.Client, query string, topK int, tradeoffPreference string) app.Msg {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	resp, err := client.RecommendAddons(ctx, api.AddonRecommendRequest{Query: query, TopK: 5})
+	if topK < 1 {
+		topK = 5
+	}
+	resp, err := client.RecommendAddons(ctx, api.AddonRecommendRequest{
+		Query:              query,
+		TopK:               topK,
+		TradeoffPreference: tradeoffPreference,
+	})
 	if err != nil {
 		return addonRecommendResultMsg{err: err}
 	}
@@ -303,18 +322,33 @@ func dispatchCommand(input string, client *api.Client, topK int, tradeoffPrefere
 			cmd: doBatchIngest(client, paths),
 			msg: fmt.Sprintf("Adding batch: %d paths", len(paths)),
 		}
+	case "/add-text":
+		if arg == "" {
+			return dispatchResult{msg: "Usage: /add-text <prompt text>"}
+		}
+		return dispatchResult{
+			cmd: doIngestText(client, arg),
+			msg: "Adding prompt text",
+		}
 	case "/add-addon":
 		if arg == "" {
-			return dispatchResult{msg: "Usage: /add-addon <mode> <name> <file-path>\n  mode: speed|quality|cost"}
+			return dispatchResult{msg: "Usage: /add-addon <path>"}
 		}
-		parts := strings.SplitN(arg, " ", 3)
-		if len(parts) < 3 {
-			return dispatchResult{msg: "Usage: /add-addon <mode> <name> <file-path>"}
+		paths := strings.Fields(arg)
+		if len(paths) != 1 {
+			return dispatchResult{msg: "Usage: /add-addon <path>"}
 		}
-		addonMode, addonName, filePath := parts[0], parts[1], parts[2]
 		return dispatchResult{
-			cmd: func() app.Msg { return doRegisterAddon(client, addonMode, addonName, filePath) },
-			msg: fmt.Sprintf("Registering add-on [%s] %s...", addonMode, addonName),
+			cmd: func() app.Msg { return doRegisterAddon(client, "", "", paths[0]) },
+			msg: "Adding add-on: " + paths[0],
+		}
+	case "/add-addon-text":
+		if arg == "" {
+			return dispatchResult{msg: "Usage: /add-addon-text <add-on text>"}
+		}
+		return dispatchResult{
+			cmd: func() app.Msg { return doRegisterAddonText(client, arg) },
+			msg: "Adding add-on text",
 		}
 	case "/health":
 		return dispatchResult{
@@ -417,11 +451,20 @@ func selectRecommendation(seg RecommendSegment, num int) (RecommendItem, bool) {
 	return RecommendItem{}, false
 }
 
+func selectAddonRecommendation(seg AddonRecommendSegment, num int) (AddonRecommendItem, bool) {
+	for _, item := range seg.Items {
+		if item.Index == num {
+			return item, true
+		}
+	}
+	return AddonRecommendItem{}, false
+}
+
 func fillVariable(templateText, varName, value string) string {
 	return strings.ReplaceAll(templateText, "["+varName+"]", value)
 }
 
-func formatFinalPrompt(item RecommendItem, values map[string]string, injectTrace bool, addonMode, addonOrder string) string {
+func formatFinalPrompt(item RecommendItem, values map[string]string, injectTrace bool, addonMode, addonOrder, addonSuffix string) string {
 	filled := item.FullText
 	for v, val := range values {
 		filled = fillVariable(filled, v, val)
@@ -430,10 +473,33 @@ func formatFinalPrompt(item RecommendItem, values map[string]string, injectTrace
 	if len(remaining) > 0 {
 		filled += "\n\nUnfilled variables: " + strings.Join(remaining, ", ")
 	}
+	filled = applyAddonByOrder(filled, addonSuffix, addonOrder)
 	if injectTrace {
 		filled += fmt.Sprintf("\n[PROMPTEE_TRACE:%d:%s:%s]", item.TemplateID, addonMode, addonOrder)
 	}
 	return filled
+}
+
+func applyAddonByOrder(basePrompt, addonSuffix, addonOrder string) string {
+	addon := strings.TrimSpace(addonSuffix)
+	if addon == "" {
+		return basePrompt
+	}
+
+	switch strings.ToLower(strings.TrimSpace(addonOrder)) {
+	case "first", "top", "before":
+		return addon + "\n\n" + basePrompt
+	case "middle":
+		mid := len(basePrompt) / 2
+		left := strings.TrimRight(basePrompt[:mid], "\n")
+		right := strings.TrimLeft(basePrompt[mid:], "\n")
+		if left == "" || right == "" {
+			return basePrompt + "\n\n" + addon
+		}
+		return left + "\n\n" + addon + "\n\n" + right
+	default:
+		return basePrompt + "\n\n" + addon
+	}
 }
 
 func parseNumSelection(input string) (int, bool) {
@@ -481,28 +547,39 @@ func formatTemplateList(items []api.TemplateItem, sortBy string) string {
 
 func formatHelpText() string {
 	copyKey, pasteKey := getClipboardKeybindings()
-	return fmt.Sprintf(`Available commands:
- /add <path> [path2 ...]  — Add prompt file(s) to vector store
- /list [--sort-by <field>] [--order asc|desc]  — List all ingested prompts
-   fields: id, title, objective, created_at, updated_at
- /add-addon <mode> <name> <file>  — Register a custom add-on (mode: speed|quality|cost)
- /model <name>            — Switch active model for telemetry tracking
- /add-model <name>        — Register new model in backend
- /copy                    — Copy filled prompt to clipboard
- /telemetry               — Show telemetry info
- /feedback <1-5>          — Rate last execution (1-5 stars)
- /daemon start|stop|status — Manage backend daemon
- /health                  — Check backend health
- /clear                   — Clear transcript
- /help                    — Show this help
- /quit                    — Exit Promptee
+	return fmt.Sprintf(`## Promptee Commands
 
- Clipboard:
-   %s  — Copy selected prompt to system clipboard
-   %s  — Paste from clipboard into input (bracketed paste mode)
+### Ingestion
+- /add <path> [path2 ...] — Add prompt file(s)
+- /add-text <text> — Add prompt directly from text
+- /add-addon <path> — Add add-on file
+- /add-addon-text <text> — Add add-on directly from text
 
- Type anything else to search for prompt recommendations.
- After results appear, press 1-9 to select one.`, copyKey, pasteKey)
+### Discovery
+- /list [--sort-by <field>] [--order asc|desc] — List ingested prompts
+- fields: id, title, objective, created_at, updated_at
+- /telemetry — Show telemetry info
+- /feedback <1-5> — Rate last execution
+
+### Runtime
+- /model <name> — Switch active model
+- /add-model <name> — Register model in backend
+- /copy — Copy filled prompt
+- /health — Check backend health
+- /daemon start|stop|status — Manage backend daemon
+
+### Session
+- /clear — Clear transcript
+- /help — Show this help
+- /quit — Exit Promptee
+
+### Clipboard
+- %s — Copy selected prompt to system clipboard
+- %s — Paste from clipboard into input (bracketed paste mode)
+
+---
+Type any plain text (without /) to search prompt recommendations.
+After results appear, press 1-9 to select one.`, copyKey, pasteKey)
 }
 
 func formatTelemetryHelp() string {
@@ -621,4 +698,3 @@ func pasteFromClipboard() (string, error) {
 	return string(output), nil
 }
 
-var _ = fmt.Sprintf
